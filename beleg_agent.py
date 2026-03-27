@@ -539,6 +539,8 @@ def verarbeite_datei(dateipfad: str):
     daten = extrahiere_rechnungsdaten(dateipfad)
     if daten is None:
         log.error(f"Extraktion fehlgeschlagen für {dateiname} – Datei bleibt in Inbox.")
+        toast("Beleg nicht verarbeitet",
+              f"{dateiname} - API nicht erreichbar. Datei bleibt in _Inbox, Agent spaeter neustarten.")
         return
 
     confidence = daten.get("gesamt_confidence", 0)
