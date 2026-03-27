@@ -150,14 +150,14 @@ class BelegTray:
     def update_icon(self, farbe):
         if self.icon:
             self.icon.icon = erstelle_icon(farbe)
-            labels = {"green": "Laeuft", "red": "Gestoppt", "yellow": "Warnung"}
+            labels = {"green": "Läuft", "red": "Gestoppt", "yellow": "Warnung"}
             self.icon.title = f"Beleg-Agent: {labels.get(farbe, farbe)}"
 
     # ── Script-Runner ──────────────────────────────────────────────────
 
     def _run_script(self, script_pfad, name):
         def _run():
-            toast(name, "Wird ausgefuehrt...")
+            toast(name, "Wird ausgeführt...")
             try:
                 result = subprocess.run(
                     [PYTHON_EXE, script_pfad],

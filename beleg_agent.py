@@ -467,7 +467,7 @@ def markiere_als_pruefen(dateipfad: str) -> str:
     neuer_pfad = os.path.join(ordner, neuer_name)
     os.rename(dateipfad, neuer_pfad)
     log.info(f"Markiert als [PRÜFEN]: {neuer_name}")
-    toast("Beleg pruefen", f"{name} - bitte manuell pruefen in _Inbox")
+    toast("Beleg prüfen", f"{name} - bitte manuell prüfen in _Inbox")
     return neuer_pfad
 
 
@@ -492,7 +492,7 @@ def lege_datei_ab(dateipfad: str, daten: dict) -> bool:
             f"Mögliches Duplikat im Protokoll: "
             f"{daten['rechnungssteller']} / {daten['betrag']} / {daten['rechnungsdatum']}"
         )
-        toast("Duplikat erkannt", f"{daten['rechnungssteller']} {daten['waehrung']} {daten['betrag']:.2f} - als [PRUEFEN] markiert")
+        toast("Duplikat erkannt", f"{daten['rechnungssteller']} {daten['waehrung']} {daten['betrag']:.2f} - als [PRÜFEN] markiert")
         markiere_als_pruefen(dateipfad)
         return False
 
@@ -540,7 +540,7 @@ def verarbeite_datei(dateipfad: str):
     if daten is None:
         log.error(f"Extraktion fehlgeschlagen für {dateiname} – Datei bleibt in Inbox.")
         toast("Beleg nicht verarbeitet",
-              f"{dateiname} - API nicht erreichbar. Datei bleibt in _Inbox, Agent spaeter neustarten.")
+              f"{dateiname} - API nicht erreichbar. Datei bleibt in _Inbox, Agent später neustarten.")
         return
 
     confidence = daten.get("gesamt_confidence", 0)
@@ -565,7 +565,7 @@ def verarbeite_datei(dateipfad: str):
         rs = daten.get('rechnungssteller', '?')
         betrag = daten.get('betrag', 0)
         waehrung = daten.get('waehrung', '')
-        toast("Beleg pruefen", f"{rs} - {waehrung} {betrag:.2f} (Confidence {confidence:.0%}) -> _Inbox pruefen")
+        toast("Beleg prüfen", f"{rs} - {waehrung} {betrag:.2f} (Confidence {confidence:.0%}) → _Inbox prüfen")
         markiere_als_pruefen(dateipfad)
 
     else:
@@ -688,8 +688,8 @@ def _pruefe_erinnerungen_intern():
 
         # 2. Unabgeglichene Belege
         if unabgeglichen >= 5:
-            toast("Abgleich faellig",
-                  f"{unabgeglichen} Belege noch nicht abgeglichen. KK/Bank-Auszuege ablegen?")
+            toast("Abgleich fällig",
+                  f"{unabgeglichen} Belege noch nicht abgeglichen. KK/Bank-Auszüge ablegen?")
 
     # 3. KK-Abgleich: Wie lange her?
     archiv_pfad = os.path.join(config.ABLAGE_STAMMPFAD, "_Abgleich", "archiv")
@@ -699,7 +699,7 @@ def _pruefe_erinnerungen_intern():
             neueste = max(os.path.getmtime(os.path.join(archiv_pfad, f)) for f in kk_dateien)
             tage_seit_kk = (jetzt.timestamp() - neueste) / 86400
             if tage_seit_kk >= 30:
-                toast("KK-Abgleich faellig",
+                toast("KK-Abgleich fällig",
                       f"Letzter KK-Abgleich vor {int(tage_seit_kk)} Tagen. Neue Transaktionen ablegen?")
 
         bank_dateien = [f for f in os.listdir(archiv_pfad) if f.startswith("Bank_")]
@@ -707,20 +707,20 @@ def _pruefe_erinnerungen_intern():
             neueste = max(os.path.getmtime(os.path.join(archiv_pfad, f)) for f in bank_dateien)
             tage_seit_bank = (jetzt.timestamp() - neueste) / 86400
             if tage_seit_bank >= 30:
-                toast("Bank-Abgleich faellig",
-                      f"Letzter Bank-Abgleich vor {int(tage_seit_bank)} Tagen. Neue Auszuege ablegen?")
+                toast("Bank-Abgleich fällig",
+                      f"Letzter Bank-Abgleich vor {int(tage_seit_bank)} Tagen. Neue Auszüge ablegen?")
 
     # 4. [PRÜFEN]-Dateien in Inbox
     if os.path.exists(config.INBOX_PFAD):
         pruefen = [f for f in os.listdir(config.INBOX_PFAD) if f.startswith("[PRÜFEN]_")]
         if pruefen:
-            toast("Belege pruefen",
-                  f"{len(pruefen)} Beleg(e) in der Inbox warten auf manuelle Pruefung")
+            toast("Belege prüfen",
+                  f"{len(pruefen)} Beleg(e) in der Inbox warten auf manuelle Prüfung")
 
     # 5. Monatsanfang: Erinnerung an eBill/Dauerauftraege
     if jetzt.day <= 3:
         toast("Monatsanfang",
-              f"Neuer Monat! eBill-Rechnungen und Monatsberichte pruefen?")
+              f"Neuer Monat! eBill-Rechnungen und Monatsberichte prüfen?")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -774,7 +774,7 @@ def main():
 
     schreibe_status("Laeuft")
     log.info(f"Ueberwache: {config.INBOX_PFAD}")
-    toast("Beleg-Agent gestartet", "Ueberwache Inbox auf neue Belege")
+    toast("Beleg-Agent gestartet", "Überwache Inbox auf neue Belege")
 
     # Erinnerungs-Timer
     letzte_erinnerung = time.time()
