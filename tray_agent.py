@@ -214,10 +214,16 @@ class BelegTray:
         toast("Beleg-Agent", "Agent gestoppt")
 
     def on_restart(self, icon, item):
+        """Startet den kompletten Tray-Agent + Beleg-Agent neu."""
         self.stop_agent()
-        time.sleep(2)
-        self.start_agent()
-        toast("Beleg-Agent", "Agent neu gestartet")
+        # Neuen Tray-Prozess starten bevor wir uns beenden
+        subprocess.Popen(
+            [PYTHON_EXE, os.path.join(AGENT_DIR, "tray_agent.py")],
+            cwd=AGENT_DIR,
+            env=self._hole_env(),
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        icon.stop()
 
     def on_kk_abgleich(self, icon, item):
         self._run_script(ABGLEICH_SCRIPT, "KK-Abgleich")
