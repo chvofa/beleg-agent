@@ -17,6 +17,7 @@ def frage(text, standard=""):
     else:
         while True:
             eingabe = input(f"  {text}: ").strip().strip('"').strip("'")
+            if eingabe:
                 return eingabe
             print("    Eingabe erforderlich.")
 
