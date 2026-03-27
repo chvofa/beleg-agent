@@ -105,18 +105,12 @@ def main():
     if os.path.exists(config_local_pfad):
         # Bestehenden Pfad auslesen
         try:
-            with open(config_local_pfad, "r", encoding="utf-8") as f:
-                inhalt = f.read()
-            # Pfad extrahieren
-            import re
-            match = re.search(r'ABLAGE_STAMMPFAD\s*=\s*[(\s]*r?"([^"]+)"', inhalt)
-            if match:
-                bestehender_pfad = match.group(1)
-                # Mehrzeilige Pfade zusammensetzen
-                matches = re.findall(r'r?"([^"]+)"', inhalt)
-                bestehender_pfad = "".join(matches)
-            else:
-                bestehender_pfad = ""
+            # config_local.py als Modul laden
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("config_local_check", config_local_pfad)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            bestehender_pfad = getattr(mod, "ABLAGE_STAMMPFAD", "")
         except Exception:
             bestehender_pfad = ""
 
