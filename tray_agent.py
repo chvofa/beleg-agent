@@ -243,6 +243,10 @@ class BelegTray:
     def on_open_log(self, icon, item):
         os.startfile(os.path.normpath(LOG_DATEI))
 
+    def on_hilfe(self, icon, item):
+        import webbrowser
+        webbrowser.open("https://github.com/chvofa/beleg-agent#readme")
+
     def on_beenden(self, icon, item):
         self.stop_agent()
         icon.stop()
@@ -275,6 +279,7 @@ class BelegTray:
                 pystray.MenuItem("Stoppen", self.on_stop),
                 pystray.MenuItem("Neustarten", self.on_restart),
             )),
+            pystray.MenuItem("Hilfe", self.on_hilfe),
             pystray.MenuItem("Beenden", self.on_beenden),
         )
 

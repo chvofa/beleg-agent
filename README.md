@@ -223,6 +223,7 @@ Agent >
   Starten
   Stoppen
   Neustarten
+Hilfe                    <-- oeffnet README auf GitHub
 Beenden
 ```
 
