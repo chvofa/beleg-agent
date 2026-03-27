@@ -1,0 +1,29 @@
+# ── Lokale Konfiguration (enthaelt persoenliche Pfade) ────────────────────
+config_local.py
+
+# ── Laufzeit-Dateien ──────────────────────────────────────────────────────
+beleg-agent.log
+beleg-agent.status
+__pycache__/
+*.pyc
+
+# ── Dokumentation mit persoenlichen Daten (Namen, Gehaelter, IBANs) ──────
+DOKUMENTATION.txt
+
+# ── Claude Code Kontext ───────────────────────────────────────────────────
+.claude/
+
+# ── Belege / Rechnungen / Excel-Protokoll (nie committen!) ────────────────
+*.xlsx
+*.pdf
+*.jpg
+*.jpeg
+*.png
+*.csv
+
+# ── Umgebung / IDE ────────────────────────────────────────────────────────
+.env
+.venv/
+*.egg-info/
+.vscode/
+.idea/
