@@ -12,12 +12,11 @@ import sys
 def frage(text, standard=""):
     """Fragt den Benutzer mit optionalem Standardwert."""
     if standard:
-        eingabe = input(f"  {text} [{standard}]: ").strip()
+        eingabe = input(f"  {text} [{standard}]: ").strip().strip('"').strip("'")
         return eingabe if eingabe else standard
     else:
         while True:
-            eingabe = input(f"  {text}: ").strip()
-            if eingabe:
+            eingabe = input(f"  {text}: ").strip().strip('"').strip("'")
                 return eingabe
             print("    Eingabe erforderlich.")
 
