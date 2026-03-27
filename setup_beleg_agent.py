@@ -191,7 +191,10 @@ def main():
 
     if ja_nein("Agent jetzt starten?"):
         print("  Starte Beleg-Agent...\n")
-        os.execv(sys.executable, [sys.executable, os.path.join(agent_dir, "tray_agent.py")])
+        subprocess.Popen(
+            [sys.executable, os.path.join(agent_dir, "tray_agent.py")],
+            cwd=agent_dir,
+        )
 
 
 if __name__ == "__main__":
