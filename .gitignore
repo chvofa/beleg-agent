@@ -4,6 +4,7 @@ config_local.py
 # ── Laufzeit-Dateien ──────────────────────────────────────────────────────
 beleg-agent.log
 beleg-agent.status
+beleg-agent.ico
 __pycache__/
 *.pyc
 

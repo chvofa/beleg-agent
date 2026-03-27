@@ -88,10 +88,14 @@ def erstelle_icon(farbe="green", size=256):
 
 # ── Toast Helper ───────────────────────────────────────────────────────────
 
+_TOAST_ICON = os.path.join(AGENT_DIR, "beleg-agent.ico")
+
 def toast(title, msg):
     try:
         from winotify import Notification
         t = Notification(app_id="Beleg-Agent", title=title, msg=msg, duration="short")
+        if os.path.exists(_TOAST_ICON):
+            t.icon = _TOAST_ICON
         t.show()
     except Exception:
         pass

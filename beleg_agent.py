@@ -28,6 +28,32 @@ from watchdog.observers import Observer
 
 import config
 
+# ── Toast Icon ────────────────────────────────────────────────────────────
+_TOAST_ICON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "beleg-agent.ico")
+
+def _erstelle_toast_icon():
+    """Erstellt ein ICO-File fuer Toast-Benachrichtigungen."""
+    if os.path.exists(_TOAST_ICON):
+        return
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        draw.ellipse([2, 2, 62, 62], fill=(46, 160, 67), outline=(255, 255, 255, 200), width=2)
+        try:
+            font = ImageFont.truetype("segoeuib.ttf", 32)
+        except Exception:
+            font = ImageFont.load_default()
+        bbox = draw.textbbox((0, 0), "B", font=font)
+        x = (64 - (bbox[2] - bbox[0])) // 2
+        y = (64 - (bbox[3] - bbox[1])) // 2 - bbox[1]
+        draw.text((x, y), "B", fill=(255, 255, 255), font=font)
+        img.save(_TOAST_ICON, format="ICO")
+    except Exception:
+        pass
+
+_erstelle_toast_icon()
+
 # ── Windows Toast Notifications ────────────────────────────────────────────
 try:
     from winotify import Notification
@@ -36,6 +62,9 @@ try:
         """Sendet Windows Toast-Benachrichtigung."""
         try:
             t = Notification(app_id="Beleg-Agent", title=title, msg=msg, duration="short")
+            if os.path.exists(_TOAST_ICON):
+                t.set_audio(None, suppress=True)
+                t.icon = _TOAST_ICON
             t.show()
         except Exception:
             pass  # Notification-Fehler sollen Agent nicht stoppen
