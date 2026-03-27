@@ -23,32 +23,39 @@ Der Agent ueberwacht einen Inbox-Ordner, extrahiert Rechnungsdaten (Rechnungsste
 - Python 3.11+
 - [Anthropic API Key](https://console.anthropic.com/)
 
-## Installation
-
-### 1. Repository klonen
+## Schnellstart
 
 ```bash
-git clone https://github.com/DEIN_USER/beleg-agent.git
+git clone https://github.com/chvofa/beleg-agent.git
 cd beleg-agent
+python setup_beleg_agent.py
 ```
 
-### 2. Abhaengigkeiten installieren
+Das Setup fragt interaktiv alles Noetige ab:
+1. Installiert Abhaengigkeiten (`pip install -r requirements.txt`)
+2. Fragt den Anthropic API Key ab und speichert ihn als Windows-Umgebungsvariable
+3. Fragt den Belege-Ordner ab und erstellt `config_local.py` + Ordnerstruktur
+4. Richtet optional den Windows-Autostart ein
+5. Bietet an, den Agent direkt zu starten
+
+## Manuelle Installation
+
+<details>
+<summary>Falls du das Setup manuell durchfuehren willst</summary>
+
+### 1. Abhaengigkeiten installieren
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. API-Key setzen
-
-Den Anthropic API Key als Windows-Umgebungsvariable setzen:
+### 2. API-Key setzen
 
 ```powershell
 [Environment]::SetEnvironmentVariable("ANTHROPIC_API_KEY", "sk-ant-...", "User")
 ```
 
-Oder ueber: Systemsteuerung > System > Erweiterte Systemeinstellungen > Umgebungsvariablen
-
-### 4. Lokale Konfiguration erstellen
+### 3. Lokale Konfiguration erstellen
 
 ```bash
 copy config_local.example.py config_local.py
@@ -60,10 +67,9 @@ Dann `config_local.py` bearbeiten und den Pfad zu deinem Belege-Ordner anpassen:
 ABLAGE_STAMMPFAD = r"C:\Users\DEIN_USER\Pfad\zu\Belege"
 ```
 
-Der Ordner sollte folgende Unterordner enthalten (werden automatisch erstellt):
-- `_Inbox` – Hier Belege ablegen zur Verarbeitung
-- `_Abgleich` – Hier KK/Bank-CSVs ablegen fuer den Abgleich
-- `_Dauerauftraege` – Hier PDFs von Dauerauftraegen ablegen
+Unterordner (`_Inbox`, `_Abgleich`, `_Dauerauftraege`) werden automatisch erstellt.
+
+</details>
 
 ## Starten
 
@@ -124,6 +130,7 @@ beleg-agent/
   abgleich_bank.py        # Bank-Abgleich
   dauerauftraege.py       # Dauerauftraege erfassen
   status.py               # Status-Checker
+  setup_beleg_agent.py    # Interaktives Setup
   start_beleg_agent.bat   # Startskript
   start_beleg_agent.vbs   # Unsichtbarer Start (kein Konsolenfenster)
   requirements.txt        # Python-Abhaengigkeiten
