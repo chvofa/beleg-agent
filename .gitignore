@@ -5,6 +5,7 @@ config_local.py
 beleg-agent.log
 beleg-agent.status
 beleg-agent.ico
+beleg-agent-icon.png
 __pycache__/
 *.pyc
 

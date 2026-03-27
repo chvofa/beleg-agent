@@ -88,7 +88,7 @@ def erstelle_icon(farbe="green", size=256):
 
 # ── Toast Helper ───────────────────────────────────────────────────────────
 
-_TOAST_ICON = os.path.join(AGENT_DIR, "beleg-agent.ico")
+_TOAST_ICON = os.path.join(AGENT_DIR, "beleg-agent-icon.png")
 
 def toast(title, msg):
     try:

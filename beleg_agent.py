@@ -29,26 +29,38 @@ from watchdog.observers import Observer
 import config
 
 # ── Toast Icon ────────────────────────────────────────────────────────────
-_TOAST_ICON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "beleg-agent.ico")
+_TOAST_ICON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "beleg-agent-icon.png")
 
 def _erstelle_toast_icon():
-    """Erstellt ein ICO-File fuer Toast-Benachrichtigungen."""
+    """Erstellt ein Icon fuer Toast-Benachrichtigungen."""
     if os.path.exists(_TOAST_ICON):
         return
     try:
         from PIL import Image, ImageDraw, ImageFont
-        img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+        size = 128
+        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
-        draw.ellipse([2, 2, 62, 62], fill=(46, 160, 67), outline=(255, 255, 255, 200), width=2)
+        margin = size // 16
+        draw.ellipse(
+            [margin, margin, size - margin, size - margin],
+            fill=(46, 160, 67),
+            outline=(255, 255, 255, 200),
+            width=max(2, size // 32),
+        )
         try:
-            font = ImageFont.truetype("segoeuib.ttf", 32)
+            font = ImageFont.truetype("segoeuib.ttf", int(size * 0.5))
         except Exception:
-            font = ImageFont.load_default()
+            try:
+                font = ImageFont.truetype("arial.ttf", int(size * 0.5))
+            except Exception:
+                font = ImageFont.load_default()
         bbox = draw.textbbox((0, 0), "B", font=font)
-        x = (64 - (bbox[2] - bbox[0])) // 2
-        y = (64 - (bbox[3] - bbox[1])) // 2 - bbox[1]
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+        x = (size - tw) // 2
+        y = (size - th) // 2 - bbox[1]
         draw.text((x, y), "B", fill=(255, 255, 255), font=font)
-        img.save(_TOAST_ICON, format="ICO")
+        img.save(_TOAST_ICON, format="PNG")
     except Exception:
         pass
 
