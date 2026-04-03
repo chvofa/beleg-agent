@@ -41,7 +41,7 @@ def main():
     agent_dir = os.path.dirname(os.path.abspath(__file__))
 
     # ── 1. Abhaengigkeiten ────────────────────────────────────────────────
-    print("[1/4] Abhaengigkeiten pruefen...\n")
+    print("[1/5] Abhaengigkeiten pruefen...\n")
 
     req_file = os.path.join(agent_dir, "requirements.txt")
     try:
@@ -56,7 +56,7 @@ def main():
         print("  Bitte manuell ausfuehren: pip install -r requirements.txt\n")
 
     # ── 2. API-Key ────────────────────────────────────────────────────────
-    print("[2/4] Anthropic API Key\n")
+    print("[2/5] Anthropic API Key\n")
 
     # Pruefen ob bereits gesetzt
     bestehender_key = ""
@@ -98,7 +98,7 @@ def main():
             print("  Bitte manuell setzen (siehe README.md)\n")
 
     # ── 3. Lokale Konfiguration ───────────────────────────────────────────
-    print("[3/4] Belege-Ordner konfigurieren\n")
+    print("[3/5] Belege-Ordner & Bank konfigurieren\n")
 
     config_local_pfad = os.path.join(agent_dir, "config_local.py")
 
@@ -127,12 +127,47 @@ def main():
         print("  Unterordner (_Inbox, _Abgleich, etc.) werden automatisch erstellt.\n")
         belege_pfad = frage("Pfad zum Belege-Ordner (z.B. C:\\Users\\Max\\Belege)")
 
+    # ── 3b. Bank-Profil ─────────────────────────────────────────────────
+    print("  Welche Bank nutzt du fuer KK- und Bank-Abgleich?\n")
+    print("    1) UBS")
+    print("    2) Raiffeisen")
+    print("    3) PostFinance")
+    print("    4) Andere / weiss nicht")
+    print()
+
+    bank_wahl = frage("Auswahl (1-4)", "1")
+    bank_map = {"1": "ubs", "2": "raiffeisen", "3": "postfinance", "4": "ubs"}
+    bank_profil = bank_map.get(bank_wahl, "ubs")
+    if bank_wahl == "4":
+        print("  Standard-Profil 'ubs' gewaehlt. Kann spaeter in config_local.py angepasst werden.")
+        print("  Neue Profile koennen in bank_profile.py ergaenzt werden.\n")
+    else:
+        print(f"  Bank-Profil: {bank_profil}\n")
+
+    # ── 3c. Kreditkarten ─────────────────────────────────────────────────
+    print("  Optional: Kreditkarten konfigurieren (fuer automatische Zahlungsart-Erkennung)")
+    print("  Gib die letzten 4 Ziffern deiner KK(s) ein, oder Enter zum Ueberspringen.\n")
+
+    karten = {}
+    kk1 = input("  KK mit CHF-Abrechnung (letzte 4 Ziffern, oder Enter): ").strip()
+    if kk1 and len(kk1) == 4 and kk1.isdigit():
+        karten[kk1] = "KK CHF"
+    kk2 = input("  KK mit EUR-Abrechnung (letzte 4 Ziffern, oder Enter): ").strip()
+    if kk2 and len(kk2) == 4 and kk2.isdigit():
+        karten[kk2] = "KK EUR"
+    print()
+
     # config_local.py schreiben
     with open(config_local_pfad, "w", encoding="utf-8") as f:
         f.write('"""\n')
         f.write("Lokale Konfiguration – NICHT ins Git committen!\n")
         f.write('"""\n\n')
         f.write(f'ABLAGE_STAMMPFAD = r"{belege_pfad}"\n')
+        f.write(f'\n# Bank-Profil: "ubs", "raiffeisen", "postfinance"\n')
+        f.write(f'BANK_PROFIL = "{bank_profil}"\n')
+        if karten:
+            f.write(f'\n# Bekannte Kreditkarten (letzte 4 Ziffern → KK-Typ)\n')
+            f.write(f'BEKANNTE_KARTEN = {repr(karten)}\n')
 
     print(f"  config_local.py gespeichert.\n")
 
@@ -148,7 +183,7 @@ def main():
     print(f"    └── _Dauerauftraege\n")
 
     # ── 4. Autostart ──────────────────────────────────────────────────────
-    print("[4/4] Autostart\n")
+    print("[4/5] Autostart\n")
 
     if ja_nein("Soll der Agent automatisch bei Windows-Start starten?"):
         try:

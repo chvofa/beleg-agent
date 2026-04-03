@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 import openpyxl
 
 import config
+import bank_profile
 
 # Windows UTF-8
 if sys.platform == "win32":
@@ -21,11 +22,21 @@ if sys.platform == "win32":
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
-def lade_csv_transaktionen(csv_pfad: str) -> list[dict]:
-    """Liest KK CSV-Export (sep=;) und gibt Liste von Transaktionen zurueck."""
-    transaktionen = []
+def _get_col(row: dict, namen: list[str]) -> str:
+    """Findet Spalte nach moeglichen Namen (Umlaut-Varianten)."""
+    for n in namen:
+        if n in row:
+            return row[n].strip() if row[n] else ""
+    # Fallback: fuzzy match auf Spaltennamen
+    for key in row:
+        for n in namen:
+            if n.lower() in key.lower() or key.lower() in n.lower():
+                return row[key].strip() if row[key] else ""
+    return ""
 
-    # CSV ist oft Latin-1/CP1252 codiert
+
+def _lese_csv(csv_pfad: str, delimiter: str = ";", skip_first_line: bool = False) -> list[str]:
+    """Liest CSV-Datei mit Auto-Encoding-Erkennung. Gibt Zeilen zurueck."""
     for enc in ("utf-8-sig", "cp1252", "latin-1"):
         try:
             with open(csv_pfad, "r", encoding=enc) as f:
@@ -37,47 +48,47 @@ def lade_csv_transaktionen(csv_pfad: str) -> list[dict]:
         with open(csv_pfad, "r", encoding="latin-1") as f:
             inhalt = f.read()
 
-    # Erste Zeile "sep=;" ueberspringen
     zeilen = inhalt.strip().split("\n")
-    if zeilen[0].strip().startswith("sep="):
+    if skip_first_line or (zeilen and zeilen[0].strip().startswith("sep=")):
         zeilen = zeilen[1:]
+    return zeilen
 
-    reader = csv.DictReader(zeilen, delimiter=";")
 
-    def get_col(row, *namen):
-        """Findet Spalte nach moeglichen Namen (Umlaut-Varianten)."""
-        for n in namen:
-            if n in row:
-                return row[n].strip() if row[n] else ""
-        # Fallback: fuzzy match auf Spaltennamen
-        for key in row:
-            for n in namen:
-                if n.lower() in key.lower() or key.lower() in n.lower():
-                    return row[key].strip() if row[key] else ""
-        return ""
+def lade_csv_transaktionen(csv_pfad: str) -> list[dict]:
+    """Liest KK CSV-Export anhand des konfigurierten Bank-Profils."""
+    profil = bank_profile.get_profil(config.BANK_PROFIL)
+    kk = profil["kk"]
+    if kk is None:
+        print(f"WARNUNG: Kein KK-Profil fuer {config.BANK_PROFIL} definiert.")
+        return []
 
+    sp = kk["spalten"]
+    zeilen = _lese_csv(csv_pfad, kk["delimiter"], kk.get("skip_first_line", False))
+    reader = csv.DictReader(zeilen, delimiter=kk["delimiter"])
+
+    transaktionen = []
     for row in reader:
         try:
-            betrag = float(get_col(row, "Betrag").replace(",", ".") or "0")
+            betrag = float(_get_col(row, sp["betrag"]).replace(",", ".") or "0")
         except ValueError:
             betrag = 0
 
-        datum_str = get_col(row, "Einkaufsdatum")
+        datum_str = _get_col(row, sp["datum"])
         try:
-            datum = datetime.strptime(datum_str, "%d.%m.%Y").date()
+            datum = datetime.strptime(datum_str, kk["datum_format"]).date()
         except ValueError:
             datum = None
 
         transaktionen.append({
             "datum": datum,
-            "buchungstext": get_col(row, "Buchungstext"),
+            "buchungstext": _get_col(row, sp["buchungstext"]),
             "betrag": betrag,
-            "orig_waehrung": get_col(row, "Originalwährung", "Originalw\xe4hrung", "Originalwaehrung"),
-            "kk_waehrung": get_col(row, "Währung", "W\xe4hrung", "Waehrung"),
-            "belastung": get_col(row, "Belastung"),
-            "gutschrift": get_col(row, "Gutschrift"),
-            "buchung": get_col(row, "Buchung"),
-            "branche": get_col(row, "Branche"),
+            "orig_waehrung": _get_col(row, sp["orig_waehrung"]),
+            "kk_waehrung": _get_col(row, sp["kk_waehrung"]),
+            "belastung": _get_col(row, sp["belastung"]),
+            "gutschrift": _get_col(row, sp["gutschrift"]),
+            "buchung": _get_col(row, sp.get("buchung", [])),
+            "branche": _get_col(row, sp.get("branche", [])),
         })
 
     return transaktionen
@@ -99,43 +110,67 @@ def erkenne_kk_typ(csv_pfad: str) -> str:
     return f"KK {haeufigste}"
 
 
+def pruefe_excel_struktur(wb: openpyxl.Workbook) -> None:
+    """Prueft ob das Excel die aktuelle Spaltenstruktur hat. Migriert falls noetig."""
+    ws = wb.active
+    header_3 = str(ws.cell(row=1, column=3).value or "")
+    if header_3 == "Betrag":
+        print("FEHLER: Excel hat die alte Spaltenstruktur!")
+        print("Bitte zuerst den Beleg-Agent starten — er migriert das Excel automatisch.")
+        raise SystemExit(1)
+
+    # Fehlende Spalten ergaenzen
+    aktuelle_spalten = ws.max_column or 0
+    erwartete_spalten = len(config.EXCEL_SPALTEN)
+    if aktuelle_spalten < erwartete_spalten:
+        for col_idx in range(aktuelle_spalten + 1, erwartete_spalten + 1):
+            ws.cell(row=1, column=col_idx).value = config.EXCEL_SPALTEN[col_idx - 1]
+
+
 def lade_excel_belege() -> tuple[openpyxl.Workbook, list[dict]]:
     """Laedt das Excel-Protokoll und gibt Workbook + Liste von Beleg-Dicts zurueck."""
     wb = openpyxl.load_workbook(config.EXCEL_PROTOKOLL)
+    pruefe_excel_struktur(wb)
     ws = wb.active
 
     belege = []
     for row_idx in range(2, ws.max_row + 1):
-        datum_str = str(ws.cell(row=row_idx, column=1).value or "").strip()
+        datum_str = str(ws.cell(row=row_idx, column=config.COL_DATUM).value or "").strip()
         try:
             datum = datetime.strptime(datum_str, "%Y-%m-%d").date()
         except ValueError:
             datum = None
 
         try:
-            betrag = float(ws.cell(row=row_idx, column=3).value or 0)
+            betrag = float(ws.cell(row=row_idx, column=config.COL_BETRAG).value or 0)
         except (ValueError, TypeError):
             betrag = 0
 
         belege.append({
             "row": row_idx,
             "datum": datum,
-            "rechnungssteller": str(ws.cell(row=row_idx, column=2).value or "").strip(),
+            "rechnungssteller": str(ws.cell(row=row_idx, column=config.COL_RECHNUNGSSTELLER).value or "").strip(),
             "betrag": betrag,
-            "waehrung": str(ws.cell(row=row_idx, column=4).value or "").strip(),
-            "typ": str(ws.cell(row=row_idx, column=5).value or "").strip(),
-            "zahlungsart": str(ws.cell(row=row_idx, column=6).value or "").strip(),
-            "abgeglichen": str(ws.cell(row=row_idx, column=10).value or "").strip(),
+            "waehrung": str(ws.cell(row=row_idx, column=config.COL_WAEHRUNG).value or "").strip(),
+            "typ": str(ws.cell(row=row_idx, column=config.COL_TYP).value or "").strip(),
+            "zahlungsart": str(ws.cell(row=row_idx, column=config.COL_ZAHLUNGSART).value or "").strip(),
+            "abgeglichen": str(ws.cell(row=row_idx, column=config.COL_ABGEGLICHEN).value or "").strip(),
         })
 
     return wb, belege
 
 
 def match_transaktion_zu_beleg(trans: dict, belege: list[dict], kk_typ: str) -> dict | None:
-    """Versucht eine KK-Transaktion einem Beleg zuzuordnen (fuzzy matching)."""
+    """Versucht eine KK-Transaktion einem Beleg zuzuordnen (fuzzy matching).
+
+    Waehrungslogik:
+    - Beleg-Waehrung muss zur Originalwaehrung der KK-Transaktion passen
+    - Betrag wird gegen Originalbetrag verglichen (nicht den umgerechneten Belastungsbetrag)
+    """
     buch = trans["buchungstext"].upper()
-    t_betrag = trans["betrag"]
+    t_betrag = trans["betrag"]          # Originalbetrag (z.B. USD 21.62)
     t_datum = trans["datum"]
+    t_orig_w = trans["orig_waehrung"].upper() if trans["orig_waehrung"] else ""
 
     beste_matches = []
 
@@ -143,12 +178,17 @@ def match_transaktion_zu_beleg(trans: dict, belege: list[dict], kk_typ: str) -> 
         b_betrag = beleg["betrag"]
         b_datum = beleg["datum"]
         b_rs = beleg["rechnungssteller"].upper()
+        b_waehrung = beleg["waehrung"].upper()
 
-        # 1. Betrag muss stimmen (kleine Toleranz fuer Rundung)
+        # 1. Waehrung muss stimmen: Beleg-Waehrung == Originalwaehrung der Transaktion
+        if t_orig_w and b_waehrung and t_orig_w != b_waehrung:
+            continue
+
+        # 2. Betrag muss stimmen (kleine Toleranz fuer Rundung)
         if abs(t_betrag - b_betrag) > 0.10:
             continue
 
-        # 2. Datums-Toleranz: KK-Einkaufsdatum kann +/- 5 Tage vom Rechnungsdatum abweichen
+        # 3. Datums-Toleranz: KK-Einkaufsdatum kann +/- 5 Tage vom Rechnungsdatum abweichen
         if t_datum and b_datum:
             diff = abs((t_datum - b_datum).days)
             if diff > 30:
@@ -157,7 +197,7 @@ def match_transaktion_zu_beleg(trans: dict, belege: list[dict], kk_typ: str) -> 
         else:
             datum_score = 0.3  # Kein Datum -> schwacher Match
 
-        # 3. Name-Matching (Teilstring)
+        # 4. Name-Matching (Teilstring)
         name_score = 0
         rs_teile = [t for t in b_rs.split() if len(t) > 2]
         for teil in rs_teile:
@@ -166,7 +206,7 @@ def match_transaktion_zu_beleg(trans: dict, belege: list[dict], kk_typ: str) -> 
         if rs_teile:
             name_score = name_score / len(rs_teile)
 
-        # Mindestens Namens- ODER Datumsaehlichkeit
+        # Mindestens Namens- ODER Datumsaehnlichkeit
         gesamt_score = (name_score * 0.6) + (datum_score * 0.4)
         if name_score > 0 or (datum_score > 0.8 and abs(t_betrag - b_betrag) < 0.02):
             beste_matches.append((gesamt_score, beleg))
@@ -183,6 +223,7 @@ def main():
     print()
     print("=" * 60)
     print("  BELEG-AGENT - KK-Abgleich")
+    print(f"  Bank-Profil: {config.BANK_PROFIL}")
     print("=" * 60)
     print()
 
@@ -215,6 +256,8 @@ def main():
             kk_dateien[kk_typ] = pfad
         else:
             print(f"    WARNUNG: Konnte KK-Typ nicht erkennen, ueberspringe.")
+            print(f"    Tipp: Stimmt das Bank-Profil? Aktuell: '{config.BANK_PROFIL}'")
+            print(f"    Aendern in config_local.py: BANK_PROFIL = \"ubs\" / \"raiffeisen\" / ...")
 
     print()
 
@@ -231,11 +274,13 @@ def main():
         print(f"--- {kk_typ} ---")
         transaktionen = lade_csv_transaktionen(csv_pfad)
 
-        # Nur 2026er Transaktionen (passend zu unseren Belegen)
-        trans_2026 = [t for t in transaktionen if t["datum"] and t["datum"].year >= 2026]
-        print(f"  {len(transaktionen)} Transaktionen total, {len(trans_2026)} ab 2026\n")
+        # Nur Transaktionen ab letztem Jahr (passend zu unseren Belegen)
+        import datetime as _dt
+        min_jahr = _dt.date.today().year - 1
+        trans_aktuell = [t for t in transaktionen if t["datum"] and t["datum"].year >= min_jahr]
+        print(f"  {len(transaktionen)} Transaktionen total, {len(trans_aktuell)} ab {min_jahr}\n")
 
-        for trans in trans_2026:
+        for trans in trans_aktuell:
             # Gebuehren/Zuschlaege ueberspringen
             if not trans["buchungstext"] or "ZUSCHLAG" in trans["buchungstext"].upper():
                 continue
@@ -254,12 +299,12 @@ def main():
                     continue
 
                 # Match gefunden -> Abgeglichen = Ja
-                ws.cell(row=row, column=10).value = "Ja"
+                ws.cell(row=row, column=config.COL_ABGEGLICHEN).value = "Ja"
 
                 # Zahlungsart ergaenzen wenn leer
-                alte_za = ws.cell(row=row, column=6).value or ""
+                alte_za = ws.cell(row=row, column=config.COL_ZAHLUNGSART).value or ""
                 if not alte_za:
-                    ws.cell(row=row, column=6).value = kk_typ
+                    ws.cell(row=row, column=config.COL_ZAHLUNGSART).value = kk_typ
                     gesamt_neu_za += 1
                     za_info = f" [Zahlungsart -> {kk_typ}]"
                 else:
@@ -267,13 +312,33 @@ def main():
 
                 # PayPal ergaenzen
                 if "PAYPAL" in trans["buchungstext"].upper():
-                    ws.cell(row=row, column=7).value = "Ja"
+                    ws.cell(row=row, column=config.COL_PAYPAL).value = "Ja"
+
+                # Fremdwaehrung: Belastungsbetrag + KK-Waehrung ins Excel schreiben
+                fx_info = ""
+                t_orig_w = trans["orig_waehrung"].upper() if trans["orig_waehrung"] else ""
+                t_kk_w = trans["kk_waehrung"].upper() if trans["kk_waehrung"] else ""
+                if t_orig_w and t_kk_w and t_orig_w != t_kk_w:
+                    # Fremdwaehrungstransaktion
+                    belastung_str = trans["belastung"]
+                    if belastung_str:
+                        try:
+                            belastung = float(belastung_str.replace(",", "."))
+                            ws.cell(row=row, column=config.COL_WAEHRUNG_BELASTET).value = t_kk_w
+                            ws.cell(row=row, column=config.COL_BETRAG_BELASTET).value = belastung
+                            fx_info = f" [FX: {t_kk_w} {belastung:.2f}]"
+                        except ValueError:
+                            pass
+                    else:
+                        # Pending-Transaktion: Kurs/Belastung noch nicht bekannt
+                        ws.cell(row=row, column=config.COL_WAEHRUNG_BELASTET).value = t_kk_w
+                        fx_info = f" [FX: {t_kk_w} pending]"
 
                 # Beleg als abgeglichen markieren (in-memory auch updaten)
                 match["abgeglichen"] = "Ja"
 
                 print(f"  NEU:  {datum_str} {orig_w} {trans['betrag']:>10.2f}  {trans['buchungstext'][:40]}")
-                print(f"        -> {match['rechnungssteller']} ({match['waehrung']} {match['betrag']}){za_info}")
+                print(f"        -> {match['rechnungssteller']} ({match['waehrung']} {match['betrag']}){za_info}{fx_info}")
                 gesamt_matches += 1
             else:
                 print(f"  KEIN BELEG: {datum_str} {orig_w} {trans['betrag']:>10.2f}  {trans['buchungstext'][:50]}")
@@ -289,7 +354,13 @@ def main():
         print()
 
     # 4. Excel speichern
-    wb.save(config.EXCEL_PROTOKOLL)
+    try:
+        wb.save(config.EXCEL_PROTOKOLL)
+    except PermissionError:
+        print("\nFEHLER: Excel-Datei ist geöffnet! Bitte schliessen und erneut versuchen.")
+        print(f"  {config.EXCEL_PROTOKOLL}")
+        wb.close()
+        return
     wb.close()
 
     # 5. CSVs archivieren

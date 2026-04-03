@@ -37,7 +37,7 @@ def main():
     ws = wb.active
     bereits = set()
     for row in range(2, ws.max_row + 1):
-        pfad = str(ws.cell(row=row, column=9).value or "")
+        pfad = str(ws.cell(row=row, column=config.COL_ABLAGEPFAD).value or "")
         if pfad:
             bereits.add(os.path.normpath(pfad))
     wb.close()
@@ -97,19 +97,21 @@ def main():
         ws = wb.active
 
         neue_zeile = [
-            datum,
-            rs,
-            betrag,
-            waehrung,
-            "Dauerauftrag",                     # Typ
-            daten.get("zahlungsart", ""),
-            "Ja" if daten.get("ist_paypal") else "Nein",
-            datei,                               # Originaldateiname
-            pfad,                                # Ablagepfad
-            "Ja",                                # Abgeglichen (Daueraufträge sind per Definition ok)
-            conf,
-            datetime.now().strftime("%Y-%m-%d %H:%M"),
-            f"Monatlicher Dauerauftrag {waehrung} {betrag:.2f}",
+            datum,                                               #  1 Datum_Rechnung
+            rs,                                                  #  2 Rechnungssteller
+            "Dauerauftrag",                                      #  3 Typ
+            betrag,                                              #  4 Betrag
+            waehrung,                                            #  5 Währung
+            daten.get("zahlungsart", ""),                         #  6 Zahlungsart
+            "Ja" if daten.get("ist_paypal") else "Nein",         #  7 PayPal
+            "",                                                  #  8 Währung_Belastet
+            "",                                                  #  9 Betrag_Belastet
+            "Ja",                                                # 10 Abgeglichen
+            f"Monatlicher Dauerauftrag {waehrung} {betrag:.2f}", # 11 Bemerkungen
+            datei,                                               # 12 Originaldateiname
+            pfad,                                                # 13 Ablagepfad
+            conf,                                                # 14 Confidence_Score
+            datetime.now().strftime("%Y-%m-%d %H:%M"),           # 15 Verarbeitungsdatum
         ]
         ws.append(neue_zeile)
         wb.save(config.EXCEL_PROTOKOLL)
