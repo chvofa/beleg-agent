@@ -15,6 +15,8 @@ from collections import defaultdict
 import openpyxl
 
 import config
+import bank_profile
+from abgleich import _get_col, _lese_csv
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -22,52 +24,60 @@ if sys.platform == "win32":
 
 
 def lade_bank_transaktionen(csv_pfad: str) -> tuple[str, list[dict]]:
-    """Liest Bankkonto CSV-Export. Gibt (waehrung, transaktionen) zurueck."""
+    """Liest Bankkonto CSV-Export anhand des konfigurierten Bank-Profils."""
+    profil = bank_profile.get_profil(config.BANK_PROFIL)
+    bp = profil["bank"]
+    if bp is None:
+        print(f"WARNUNG: Kein Bank-Profil fuer {config.BANK_PROFIL} definiert.")
+        return "", []
 
-    for enc in ("utf-8-sig", "cp1252", "latin-1"):
-        try:
-            with open(csv_pfad, "r", encoding=enc) as f:
-                inhalt = f.read()
-            break
-        except UnicodeDecodeError:
-            continue
+    sp = bp["spalten"]
+    zeilen = _lese_csv(csv_pfad, bp["delimiter"])
 
-    zeilen = inhalt.strip().split("\n")
-
-    # Header-Block parsen (Zeilen 1-8 vor der leeren Zeile)
+    # Waehrung erkennen
     waehrung = ""
-    for zeile in zeilen[:10]:
-        if zeile.startswith("Bewertet in"):
-            waehrung = zeile.split(";")[1].strip()
-            break
+    we = bp["waehrung_erkennung"]
+    if we["methode"] == "header_zeile":
+        for zeile in zeilen[:10]:
+            if zeile.startswith(we["prefix"]):
+                waehrung = zeile.split(we["separator"])[we["position"]].strip()
+                break
 
-    # Datenzeilen finden (nach der Header-Zeile mit "Abschlussdatum")
+    # Datenzeilen finden
     daten_start = None
-    for i, zeile in enumerate(zeilen):
-        if zeile.startswith("Abschlussdatum;"):
-            daten_start = i
-            break
+    ds = bp["daten_start"]
+    if ds["methode"] == "header_prefix":
+        for i, zeile in enumerate(zeilen):
+            if zeile.startswith(ds["prefix"]):
+                daten_start = i
+                break
 
     if daten_start is None:
         return waehrung, []
 
-    # CSV parsen ab Datenzeilen
-    reader = csv.DictReader(zeilen[daten_start:], delimiter=";")
+    reader = csv.DictReader(zeilen[daten_start:], delimiter=bp["delimiter"])
+
+    # Skip-Listen aus Profil
+    skip_beschreibung = bp.get("skip_beschreibung", [])
+    skip_details = bp.get("skip_details", [])
+    skip_buchungstext = bp.get("skip_buchungstext", [])
 
     transaktionen = []
-    aktuelle_sammel = None  # Fuer Sammelauftraege (Zeilen ohne Datum)
-
     for row in reader:
-        datum_str = (row.get("Abschlussdatum") or "").strip()
-        beschr1 = (row.get("Beschreibung1") or "").strip().strip('"')
-        beschr2 = (row.get("Beschreibung2") or "").strip().strip('"')
-        beschr3 = (row.get("Beschreibung3") or "").strip().strip('"')
+        datum_str = _get_col(row, sp["datum"])
 
-        belastung_str = (row.get("Belastung") or "").strip()
-        gutschrift_str = (row.get("Gutschrift") or "").strip()
-        einzelbetrag_str = (row.get("Einzelbetrag") or "").strip()
+        # Beschreibung aus mehreren Spalten zusammenfuegen
+        beschr_teile = [_get_col(row, [s]).strip().strip('"') for s in sp["beschreibung"]]
+        beschreibung = " ".join(t for t in beschr_teile if t)
+
+        # Details-Spalte
+        details = _get_col(row, sp.get("details", [])).strip().strip('"')
 
         # Betrag bestimmen
+        belastung_str = _get_col(row, sp["belastung"])
+        gutschrift_str = _get_col(row, sp["gutschrift"])
+        einzelbetrag_str = _get_col(row, sp.get("einzelbetrag", []))
+
         betrag = 0
         ist_gutschrift = False
         if gutschrift_str:
@@ -95,26 +105,39 @@ def lade_bank_transaktionen(csv_pfad: str) -> tuple[str, list[dict]]:
         # Datum parsen
         if datum_str:
             try:
-                datum = datetime.strptime(datum_str, "%Y-%m-%d").date()
+                datum = datetime.strptime(datum_str, bp["datum_format"]).date()
             except ValueError:
                 datum = None
 
-            # Bankgebuehren und Saldo-Abschlüsse ueberspringen
-            if "Dienstleistungspreisabschluss" in beschr1 or "Depotpreis" in beschr1:
+            # Skip-Filter aus Profil anwenden
+            skip = False
+            for muster in skip_beschreibung:
+                if muster in beschreibung:
+                    skip = True
+                    break
+            for muster in skip_details:
+                if muster in details:
+                    skip = True
+                    break
+            for muster in skip_buchungstext:
+                if muster in beschreibung:
+                    skip = True
+                    break
+            if skip:
                 continue
-            # KK-Rechnungen ueberspringen (die werden separat abgeglichen)
-            if "KREDITKARTEN-RECHNUNG" in beschr3:
-                continue
-            # FX Spot ueberspringen
-            if "Kauf FX Spot" in beschr2:
-                continue
+
+            # Waehrung aus Spalte lesen (fuer Banken die es pro Zeile angeben)
+            if we["methode"] == "spalte":
+                zeilen_w = _get_col(row, we["spalte"])
+                if zeilen_w:
+                    waehrung = zeilen_w
 
             transaktionen.append({
                 "datum": datum,
                 "betrag": betrag,
                 "ist_gutschrift": ist_gutschrift,
-                "beschreibung": f"{beschr1} {beschr2}".strip(),
-                "details": beschr3,
+                "beschreibung": beschreibung,
+                "details": details,
                 "waehrung": waehrung,
             })
         else:
@@ -123,8 +146,8 @@ def lade_bank_transaktionen(csv_pfad: str) -> tuple[str, list[dict]]:
                 "datum": transaktionen[-1]["datum"] if transaktionen else None,
                 "betrag": betrag,
                 "ist_gutschrift": ist_gutschrift,
-                "beschreibung": f"{beschr1} {beschr2}".strip(),
-                "details": beschr3,
+                "beschreibung": beschreibung,
+                "details": details,
                 "waehrung": waehrung,
             })
 
@@ -132,16 +155,30 @@ def lade_bank_transaktionen(csv_pfad: str) -> tuple[str, list[dict]]:
 
 
 def erkenne_bank_typ(csv_pfad: str) -> str:
-    """Erkennt Waehrung aus Header."""
-    for enc in ("utf-8-sig", "cp1252", "latin-1"):
-        try:
-            with open(csv_pfad, "r", encoding=enc) as f:
-                for line in f:
-                    if line.startswith("Bewertet in"):
-                        return line.split(";")[1].strip()
-            break
-        except UnicodeDecodeError:
-            continue
+    """Erkennt Waehrung aus CSV anhand des Bank-Profils."""
+    profil = bank_profile.get_profil(config.BANK_PROFIL)
+    bp = profil["bank"]
+    if bp is None:
+        return "?"
+
+    zeilen = _lese_csv(csv_pfad, bp["delimiter"])
+    we = bp["waehrung_erkennung"]
+
+    if we["methode"] == "header_zeile":
+        for zeile in zeilen[:10]:
+            if zeile.startswith(we["prefix"]):
+                return zeile.split(we["separator"])[we["position"]].strip()
+    elif we["methode"] == "spalte":
+        # Erste Datenzeile lesen
+        ds = bp["daten_start"]
+        for i, zeile in enumerate(zeilen):
+            if zeile.startswith(ds["prefix"]):
+                reader = csv.DictReader(zeilen[i:], delimiter=bp["delimiter"])
+                for row in reader:
+                    w = _get_col(row, we["spalte"])
+                    if w:
+                        return w
+                break
     return "?"
 
 
@@ -155,11 +192,18 @@ def match_bank_transaktion(trans: dict, belege: list[dict]) -> dict | None:
 
     beste_matches = []
 
+    t_waehrung = trans["waehrung"].upper() if trans.get("waehrung") else ""
+
     for beleg in belege:
         b_betrag = beleg["betrag"]
         b_datum = beleg["datum"]
         b_rs = beleg["rechnungssteller"].upper()
         b_typ = beleg["typ"]
+        b_waehrung = beleg["waehrung"].upper()
+
+        # Waehrung muss stimmen (Bank-Konto-Waehrung == Beleg-Waehrung)
+        if t_waehrung and b_waehrung and t_waehrung != b_waehrung:
+            continue
 
         # Betrag muss stimmen
         if abs(t_betrag - b_betrag) > 1.0:  # Etwas mehr Toleranz fuer Bank
@@ -208,6 +252,7 @@ def main():
     print()
     print("=" * 60)
     print("  BELEG-AGENT - Bank-Abgleich")
+    print(f"  Bank-Profil: {config.BANK_PROFIL}")
     print("=" * 60)
     print()
 
@@ -217,51 +262,81 @@ def main():
     os.makedirs(archiv_pfad, exist_ok=True)
 
     # Bank-CSVs finden (nicht KK-Archiv-Dateien)
+    profil = bank_profile.get_profil(config.BANK_PROFIL)
+    bp = profil["bank"]
+    erkennung = bp.get("erkennung", {}) if bp else {}
+
     csv_dateien = []
     for f in os.listdir(abgleich_pfad):
         if not f.lower().endswith(".csv"):
             continue
         pfad = os.path.join(abgleich_pfad, f)
-        # Check ob es ein Bank-Export ist (Header "Kontonummer:")
         try:
-            with open(pfad, "r", encoding="cp1252") as fh:
-                erste_zeile = fh.readline()
-            if "Kontonummer" in erste_zeile:
-                csv_dateien.append(f)
+            zeilen = _lese_csv(pfad, bp["delimiter"] if bp else ";")
+            erste_zeile = zeilen[0] if zeilen else ""
+            # Erkennungsmethode aus Profil
+            if erkennung.get("methode") == "header_prefix":
+                if erste_zeile.startswith(erkennung["prefix"]):
+                    csv_dateien.append(f)
+            elif erkennung.get("methode") == "content_contains":
+                if erkennung["text"] in " ".join(zeilen[:5]):
+                    csv_dateien.append(f)
+            else:
+                # Fallback: generisch pruefen
+                if "Kontonummer" in erste_zeile or "IBAN" in erste_zeile:
+                    csv_dateien.append(f)
         except Exception:
             pass
 
     if not csv_dateien:
+        csv_vorhanden = [f for f in os.listdir(abgleich_pfad) if f.lower().endswith(".csv")]
+        if csv_vorhanden:
+            print(f"HINWEIS: {len(csv_vorhanden)} CSV-Datei(en) gefunden, aber keine als Bank-Export erkannt.")
+            print(f"  Stimmt das Bank-Profil? Aktuell: '{config.BANK_PROFIL}'")
+            print(f"  Aendern in config_local.py: BANK_PROFIL = \"ubs\" / \"raiffeisen\" / ...")
+            print()
         print("Keine Bank-CSV-Dateien gefunden.")
         return
 
     print(f"Gefunden: {len(csv_dateien)} Bank-CSV-Datei(en)\n")
 
-    # Excel laden
+    # Excel laden + Struktur pruefen
     wb = openpyxl.load_workbook(config.EXCEL_PROTOKOLL)
     ws = wb.active
+    header_3 = str(ws.cell(row=1, column=3).value or "")
+    if header_3 == "Betrag":
+        print("FEHLER: Excel hat die alte Spaltenstruktur!")
+        print("Bitte zuerst den Beleg-Agent starten — er migriert das Excel automatisch.")
+        wb.close()
+        return
+    # Fehlende Spalten ergaenzen
+    aktuelle_spalten = ws.max_column or 0
+    erwartete_spalten = len(config.EXCEL_SPALTEN)
+    if aktuelle_spalten < erwartete_spalten:
+        for col_idx in range(aktuelle_spalten + 1, erwartete_spalten + 1):
+            ws.cell(row=1, column=col_idx).value = config.EXCEL_SPALTEN[col_idx - 1]
 
     belege = []
     for row_idx in range(2, ws.max_row + 1):
-        datum_str = str(ws.cell(row=row_idx, column=1).value or "").strip()
+        datum_str = str(ws.cell(row=row_idx, column=config.COL_DATUM).value or "").strip()
         try:
             datum = datetime.strptime(datum_str, "%Y-%m-%d").date()
         except ValueError:
             datum = None
         try:
-            betrag = float(ws.cell(row=row_idx, column=3).value or 0)
+            betrag = float(ws.cell(row=row_idx, column=config.COL_BETRAG).value or 0)
         except (ValueError, TypeError):
             betrag = 0
 
         belege.append({
             "row": row_idx,
             "datum": datum,
-            "rechnungssteller": str(ws.cell(row=row_idx, column=2).value or "").strip(),
+            "rechnungssteller": str(ws.cell(row=row_idx, column=config.COL_RECHNUNGSSTELLER).value or "").strip(),
             "betrag": betrag,
-            "waehrung": str(ws.cell(row=row_idx, column=4).value or "").strip(),
-            "typ": str(ws.cell(row=row_idx, column=5).value or "Rechnung").strip(),
-            "zahlungsart": str(ws.cell(row=row_idx, column=6).value or "").strip(),
-            "abgeglichen": str(ws.cell(row=row_idx, column=10).value or "").strip(),
+            "waehrung": str(ws.cell(row=row_idx, column=config.COL_WAEHRUNG).value or "").strip(),
+            "typ": str(ws.cell(row=row_idx, column=config.COL_TYP).value or "Rechnung").strip(),
+            "zahlungsart": str(ws.cell(row=row_idx, column=config.COL_ZAHLUNGSART).value or "").strip(),
+            "abgeglichen": str(ws.cell(row=row_idx, column=config.COL_ABGEGLICHEN).value or "").strip(),
         })
 
     gesamt_matches = 0
@@ -276,11 +351,13 @@ def main():
         print(f"--- {bank_typ} ({datei}) ---")
         waehrung_csv, transaktionen = lade_bank_transaktionen(pfad)
 
-        # Nur 2026
-        trans_2026 = [t for t in transaktionen if t["datum"] and t["datum"].year >= 2026]
-        print(f"  {len(transaktionen)} Transaktionen total, {len(trans_2026)} ab 2026\n")
+        # Nur Transaktionen ab letztem Jahr
+        import datetime as _dt
+        min_jahr = _dt.date.today().year - 1
+        trans_aktuell = [t for t in transaktionen if t["datum"] and t["datum"].year >= min_jahr]
+        print(f"  {len(transaktionen)} Transaktionen total, {len(trans_aktuell)} ab {min_jahr}\n")
 
-        for trans in trans_2026:
+        for trans in trans_aktuell:
             match = match_bank_transaktion(trans, belege)
 
             datum_str = trans["datum"].strftime("%d.%m.%Y") if trans["datum"] else "?"
@@ -293,11 +370,11 @@ def main():
                     continue
 
                 row = match["row"]
-                ws.cell(row=row, column=10).value = "Ja"
+                ws.cell(row=row, column=config.COL_ABGEGLICHEN).value = "Ja"
 
-                alte_za = ws.cell(row=row, column=6).value or ""
+                alte_za = ws.cell(row=row, column=config.COL_ZAHLUNGSART).value or ""
                 if not alte_za:
-                    ws.cell(row=row, column=6).value = "Überweisung"
+                    ws.cell(row=row, column=config.COL_ZAHLUNGSART).value = "Überweisung"
                     gesamt_neu_za += 1
                     za_info = " [Zahlungsart -> Überweisung]"
                 else:
@@ -320,7 +397,13 @@ def main():
         print()
 
     # Speichern
-    wb.save(config.EXCEL_PROTOKOLL)
+    try:
+        wb.save(config.EXCEL_PROTOKOLL)
+    except PermissionError:
+        print("\nFEHLER: Excel-Datei ist geöffnet! Bitte schliessen und erneut versuchen.")
+        print(f"  {config.EXCEL_PROTOKOLL}")
+        wb.close()
+        return
     wb.close()
 
     # Archivieren

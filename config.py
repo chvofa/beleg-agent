@@ -16,6 +16,16 @@ except ImportError:
     print("Kopiere config_local.example.py → config_local.py und passe die Pfade an.")
     sys.exit(1)
 
+try:
+    from config_local import BEKANNTE_KARTEN
+except ImportError:
+    BEKANNTE_KARTEN = {}  # Keine Karten konfiguriert → Vision erkennt ZA ohne Hinweis
+
+try:
+    from config_local import BANK_PROFIL
+except ImportError:
+    BANK_PROFIL = "ubs"  # Standard-Bankprofil
+
 # ── Pfade (abgeleitet aus ABLAGE_STAMMPFAD) ───────────────────────────────
 INBOX_PFAD = os.path.join(ABLAGE_STAMMPFAD, "_Inbox")
 
@@ -57,21 +67,41 @@ MONATE = {
 }
 
 # ── Excel-Spalten ──────────────────────────────────────────────────────────
+# Reihenfolge: Kerndaten → Finanzen → Abgleich → Bemerkungen → Metadaten
 EXCEL_SPALTEN = [
-    "Datum_Rechnung",
-    "Rechnungssteller",
-    "Betrag",
-    "Währung",
-    "Typ",               # Rechnung / Gutschrift
-    "Zahlungsart",       # KK CHF / KK EUR / Überweisung / leer (= unbekannt)
-    "PayPal",            # Ja / Nein
-    "Originaldateiname",
-    "Ablagepfad",
-    "Abgeglichen",       # Nein / Ja – wird erst nach Bank-/KK-Abgleich auf Ja gesetzt
-    "Confidence_Score",
-    "Verarbeitungsdatum",
-    "Bemerkungen",
+    "Datum_Rechnung",       #  1 - Kerndaten
+    "Rechnungssteller",     #  2
+    "Typ",                  #  3 - Rechnung / Gutschrift / Dauerauftrag
+    "Betrag",               #  4 - Finanzen
+    "Währung",              #  5
+    "Zahlungsart",          #  6 - KK CHF / KK EUR / Überweisung / eBill / leer
+    "PayPal",               #  7 - Ja / Nein
+    "Währung_Belastet",     #  8 - KK-Abrechnungswährung bei Fremdwährung
+    "Betrag_Belastet",      #  9 - Tatsächlich belasteter Betrag in KK-Währung
+    "Abgeglichen",          # 10 - Nein / Ja
+    "Bemerkungen",          # 11 - Trinkgeld, Hinweise etc.
+    "Originaldateiname",    # 12 - Metadaten
+    "Ablagepfad",           # 13
+    "Confidence_Score",     # 14
+    "Verarbeitungsdatum",   # 15
 ]
+
+# ── Spalten-Nummern (für Code-Referenzen) ─────────────────────────────────
+COL_DATUM = 1
+COL_RECHNUNGSSTELLER = 2
+COL_TYP = 3
+COL_BETRAG = 4
+COL_WAEHRUNG = 5
+COL_ZAHLUNGSART = 6
+COL_PAYPAL = 7
+COL_WAEHRUNG_BELASTET = 8
+COL_BETRAG_BELASTET = 9
+COL_ABGEGLICHEN = 10
+COL_BEMERKUNGEN = 11
+COL_ORIGINALDATEINAME = 12
+COL_ABLAGEPFAD = 13
+COL_CONFIDENCE = 14
+COL_VERARBEITUNGSDATUM = 15
 
 # ── Bank-/KK-Abgleich (für späteres Reconciliation-Feature) ──────────────
 # Pfade zu CSV-Exporten der Bank-/KK-Auszüge

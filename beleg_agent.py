@@ -160,6 +160,7 @@ Antworte ausschließlich mit validem JSON, kein anderer Text.
   "typ": "Rechnung",
   "zahlungsart": "",
   "ist_paypal": false,
+  "bemerkungen": "",
   "confidence": {
     "rechnungssteller": 0.95,
     "rechnungsdatum": 0.90,
@@ -173,9 +174,16 @@ Antworte ausschließlich mit validem JSON, kein anderer Text.
 Regeln:
 - rechnungssteller: Kurzname des Unternehmens (z.B. "Amazon", "Migros", "Swisscom")
 - rechnungsdatum: Falls nicht erkennbar, verwende das heutige Datum und setze confidence niedrig
-- betrag: Gesamtbetrag / Endbetrag / Saldo als Zahl (kein Tausendertrennzeichen), immer positiv.
+- betrag: Der tatsächlich BEZAHLTE Betrag als Zahl (kein Tausendertrennzeichen), immer positiv.
+  WICHTIG bei Restaurants/Bars: Oft sind Quittung UND Kreditkartenbeleg im selben Bild.
+  Wenn ein KK-Beleg vorhanden ist (Total-EFT, Summe auf Kartenbeleg), verwende DIESEN Betrag,
+  denn er enthält das Trinkgeld und entspricht dem was auf der KK-Abrechnung erscheint.
+  Beispiel: Quittung zeigt CHF 87.50, KK-Beleg zeigt Summe CHF 95.00 → betrag = 95.00
+  Bei normalen Rechnungen (ohne KK-Beleg): Gesamtbetrag / Endbetrag / Saldo.
   Kann auf einer späteren Seite stehen (z.B. "Saldo zu Ihren Gunsten" bei Versicherungen).
 - waehrung: ISO-Code der Rechnungswährung (CHF, EUR, USD, GBP, etc.)
+  WICHTIG: "$" oder "US$" bedeutet immer USD, nicht CHF! Auch wenn der Empfänger in der Schweiz ist.
+  "Fr." oder "SFr." = CHF. "€" = EUR. "£" = GBP. "¥" = JPY.
 - typ: "Rechnung" (wir zahlen) oder "Gutschrift" (wir erhalten Geld zurück).
   Gutschrift = Rückerstattung, Credit Note, Rückvergütung, Versicherungsleistung, Kundenzahlung an uns.
   Im Zweifel: "Rechnung".
@@ -184,10 +192,23 @@ Regeln:
     "KK EUR" = Kreditkarte mit EUR-Abrechnung
     "Überweisung" = Banküberweisung / Einzahlung / LSV
     "" = leer lassen wenn Zahlungsart nicht erkennbar
-  Hinweis: Die Rechnungswährung (z.B. USD) kann sich von der Karte unterscheiden.
-  Achte auf Hinweise wie Kartennummer, Firmenname auf KK, Zahlungsmethode, VISA, etc.
+  Hinweis: Die Rechnungswährung (z.B. USD) kann sich von der Karte unterscheiden!
+  Eine USD-Rechnung kann mit KK CHF oder KK EUR bezahlt werden.
+  Achte auf Hinweise wie Kartennummer, Firmenname auf KK, Zahlungsmethode, VISA, etc."""
+
+    # Bekannte Karten aus config_local.py einfügen (nicht im Code hardcoden!)
+    if config.BEKANNTE_KARTEN:
+        karten_liste = ", ".join(
+            f"endend auf {nr} = {typ}" for nr, typ in config.BEKANNTE_KARTEN.items()
+        )
+        prompt += f"\n  Bekannte Karten: {karten_liste}."
+
+    prompt += """
 - ist_paypal: true wenn PayPal als Zahlungsweg erkennbar ist (PayPal-Logo, PayPal-Transaktionscode, etc.)
   Hinweis: PayPal und Kreditkarte schliessen sich nicht aus – PayPal kann über KK laufen.
+- bemerkungen: Zusätzliche Infos, z.B. Trinkgeld bei Restaurants. Leer lassen wenn nichts Besonderes.
+  Format Trinkgeld: "Trinkgeld: [Währung] [Betrag] (Rechnungsbetrag [Währung] [Subtotal])"
+  Beispiel: "Trinkgeld: CHF 7.50 (Rechnungsbetrag CHF 87.50)"
 - confidence: Dein Vertrauenswert 0.0-1.0 für jedes Feld.
   Setze zahlungsart-confidence auf 0.0 wenn du keine Zahlungsinfo findest (Feld bleibt leer).
 """
@@ -270,12 +291,17 @@ def lookup_zahlungsart(rechnungssteller: str) -> tuple[str, bool | None]:
     zahlungsart = ""
     ist_paypal = None
 
+    # 0-indexed: COL-1
+    IDX_RS = config.COL_RECHNUNGSSTELLER - 1    # 1
+    IDX_ZA = config.COL_ZAHLUNGSART - 1         # 5
+    IDX_PP = config.COL_PAYPAL - 1              # 6
+
     for row in ws.iter_rows(min_row=2, values_only=True):
-        rs_alt = str(row[1] or "").lower().strip()
+        rs_alt = str(row[IDX_RS] or "").lower().strip()
         # Fuzzy-Match: Teilstring in beide Richtungen
         if rs_neu in rs_alt or rs_alt in rs_neu:
-            za = str(row[5] or "").strip()
-            pp = str(row[6] or "").strip()
+            za = str(row[IDX_ZA] or "").strip()
+            pp = str(row[IDX_PP] or "").strip()
             if za and za in ("KK CHF", "KK EUR", "Überweisung"):
                 zahlungsart = za
             if pp == "Ja":
@@ -336,11 +362,11 @@ def pruefe_duplikat_protokoll(daten: dict) -> bool:
     for row in ws.iter_rows(min_row=2, values_only=True):
         if row[0] is None:
             continue
-        # Spalten: Datum(0), Rechnungssteller(1), Betrag(2)
+        # Spalten (0-idx): Datum(0), Rechnungssteller(1), Typ(2), Betrag(3)
         datum_alt = str(row[0]).strip() if row[0] else ""
         rs_alt = str(row[1]).lower().strip() if row[1] else ""
         try:
-            betrag_alt = float(row[2]) if row[2] else 0
+            betrag_alt = float(row[3]) if row[3] else 0
         except (ValueError, TypeError):
             betrag_alt = 0
 
@@ -362,9 +388,105 @@ def pruefe_duplikat_datei(zielordner: str, dateiname: str) -> bool:
     return os.path.exists(os.path.join(zielordner, dateiname))
 
 
+def migriere_excel_spalten():
+    """Migriert das Excel-Protokoll automatisch wenn die Spaltenreihenfolge veraltet ist.
+
+    Erkennung: Wenn Spalte 3 = 'Betrag' (alt) statt 'Typ' (neu), muss migriert werden.
+    Alte Reihenfolge: Datum, RS, Betrag, Währung, Typ, ZA, PP, Orig, Pfad, Abgl, Conf, Verarb, Bem [, W_Bel, B_Bel]
+    Neue Reihenfolge: Datum, RS, Typ, Betrag, Währung, ZA, PP, W_Bel, B_Bel, Abgl, Bem, Orig, Pfad, Conf, Verarb
+    """
+    if not os.path.exists(config.EXCEL_PROTOKOLL):
+        return
+
+    try:
+        wb = openpyxl.load_workbook(config.EXCEL_PROTOKOLL)
+    except PermissionError:
+        log.warning("Excel ist geöffnet — Migration übersprungen.")
+        return
+
+    ws = wb.active
+    header_3 = str(ws.cell(row=1, column=3).value or "")
+
+    if header_3 == "Typ":
+        # Bereits neue Struktur — nur fehlende Spalten ergänzen
+        aktuelle = ws.max_column or 0
+        erwartete = len(config.EXCEL_SPALTEN)
+        if aktuelle < erwartete:
+            for col_idx in range(aktuelle + 1, erwartete + 1):
+                ws.cell(row=1, column=col_idx).value = config.EXCEL_SPALTEN[col_idx - 1]
+            wb.save(config.EXCEL_PROTOKOLL)
+            log.info(f"Neue Spalten ergänzt: {config.EXCEL_SPALTEN[aktuelle:]}")
+        wb.close()
+        return
+
+    if header_3 != "Betrag":
+        wb.close()
+        log.warning(f"Unbekannte Excel-Struktur (Spalte 3 = '{header_3}'), Migration übersprungen.")
+        return
+
+    log.info("Alte Excel-Struktur erkannt — starte automatische Migration...")
+
+    # Mapping: alte Spalte → neue Spalte
+    # Alt:  1=Datum, 2=RS, 3=Betrag, 4=Währ, 5=Typ, 6=ZA, 7=PP, 8=Orig, 9=Pfad,
+    #       10=Abgl, 11=Conf, 12=Verarb, 13=Bem, 14=W_Bel, 15=B_Bel
+    # Neu:  1=Datum, 2=RS, 3=Typ, 4=Betrag, 5=Währ, 6=ZA, 7=PP, 8=W_Bel, 9=B_Bel,
+    #       10=Abgl, 11=Bem, 12=Orig, 13=Pfad, 14=Conf, 15=Verarb
+    ALT_ZU_NEU = {
+        1: 1, 2: 2, 3: 4, 4: 5, 5: 3, 6: 6, 7: 7, 8: 12, 9: 13,
+        10: 10, 11: 14, 12: 15, 13: 11, 14: 8, 15: 9,
+    }
+
+    # Alle Daten auslesen
+    max_row = ws.max_row
+    max_col = ws.max_column or 15
+    alte_daten = []
+    for row in range(2, max_row + 1):
+        zeile = {}
+        for col in range(1, max_col + 1):
+            zeile[col] = ws.cell(row=row, column=col).value
+        alte_daten.append(zeile)
+
+    wb.close()
+
+    # Backup
+    import shutil
+    from datetime import datetime as dt
+    backup = config.EXCEL_PROTOKOLL.replace(".xlsx", f"_pre_migration.xlsx")
+    shutil.copy2(config.EXCEL_PROTOKOLL, backup)
+    log.info(f"Backup erstellt: {backup}")
+
+    # Neues Workbook schreiben
+    wb_neu = openpyxl.Workbook()
+    ws_neu = wb_neu.active
+    ws_neu.title = "Belege"
+
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="2F5496", end_color="2F5496", fill_type="solid")
+
+    for col_idx, name in enumerate(config.EXCEL_SPALTEN, start=1):
+        zelle = ws_neu.cell(row=1, column=col_idx, value=name)
+        zelle.font = header_font
+        zelle.fill = header_fill
+
+    for zeile_idx, alte_zeile in enumerate(alte_daten, start=2):
+        for alt_col, neu_col in ALT_ZU_NEU.items():
+            ws_neu.cell(row=zeile_idx, column=neu_col, value=alte_zeile.get(alt_col))
+
+    # Spaltenbreiten
+    breiten = {1: 14, 2: 30, 3: 12, 4: 12, 5: 10, 6: 14, 7: 8,
+               8: 10, 9: 14, 10: 12, 11: 40, 12: 30, 13: 80, 14: 10, 15: 20}
+    for col, breite in breiten.items():
+        ws_neu.column_dimensions[openpyxl.utils.get_column_letter(col)].width = breite
+
+    wb_neu.save(config.EXCEL_PROTOKOLL)
+    wb_neu.close()
+    log.info(f"Migration abgeschlossen: {len(alte_daten)} Zeilen umstrukturiert.")
+
+
 def erstelle_excel_wenn_noetig():
     """Erstellt das Excel-Protokoll mit Header falls es noch nicht existiert."""
     if os.path.exists(config.EXCEL_PROTOKOLL):
+        migriere_excel_spalten()
         return
 
     os.makedirs(os.path.dirname(config.EXCEL_PROTOKOLL), exist_ok=True)
@@ -383,8 +505,9 @@ def erstelle_excel_wenn_noetig():
         zelle.alignment = Alignment(horizontal="center")
 
     # Spaltenbreiten
-    breiten = [15, 25, 12, 10, 12, 14, 10, 35, 60, 12, 15, 18, 40]
-    for i, b in enumerate(breiten, start=1):
+    breiten = {1: 14, 2: 30, 3: 12, 4: 12, 5: 10, 6: 14, 7: 8,
+               8: 10, 9: 14, 10: 12, 11: 40, 12: 30, 13: 80, 14: 10, 15: 20}
+    for i, b in breiten.items():
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = b
 
     wb.save(config.EXCEL_PROTOKOLL)
@@ -401,19 +524,21 @@ def schreibe_protokoll(daten: dict, original_name: str, ablagepfad: str):
         ws = wb.active
 
         neue_zeile = [
-            daten.get("rechnungsdatum", ""),
-            daten.get("rechnungssteller", ""),
-            daten.get("betrag", 0),
-            daten.get("waehrung", ""),
-            daten.get("typ", "Rechnung"),           # Rechnung / Gutschrift
-            daten.get("zahlungsart", ""),            # KK CHF / KK EUR / Überweisung / leer
-            "Ja" if daten.get("ist_paypal") else "Nein",
-            original_name,
-            ablagepfad,
-            "Nein",
-            daten.get("gesamt_confidence", 0),
-            datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "",                                      # Bemerkungen
+            daten.get("rechnungsdatum", ""),                # 1  Datum_Rechnung
+            daten.get("rechnungssteller", ""),               # 2  Rechnungssteller
+            daten.get("typ", "Rechnung"),                    # 3  Typ
+            daten.get("betrag", 0),                          # 4  Betrag
+            daten.get("waehrung", ""),                        # 5  Währung
+            daten.get("zahlungsart", ""),                     # 6  Zahlungsart
+            "Ja" if daten.get("ist_paypal") else "Nein",     # 7  PayPal
+            "",                                               # 8  Währung_Belastet
+            "",                                               # 9  Betrag_Belastet
+            "Nein",                                           # 10 Abgeglichen
+            daten.get("bemerkungen", ""),                     # 11 Bemerkungen
+            original_name,                                    # 12 Originaldateiname
+            ablagepfad,                                       # 13 Ablagepfad
+            daten.get("gesamt_confidence", 0),                # 14 Confidence_Score
+            datetime.now().strftime("%Y-%m-%d %H:%M"),        # 15 Verarbeitungsdatum
         ]
         ws.append(neue_zeile)
         wb.save(config.EXCEL_PROTOKOLL)
@@ -705,7 +830,7 @@ def _pruefe_erinnerungen_intern():
         letztes_datum = None
         unabgeglichen = 0
         for row in range(2, ws.max_row + 1):
-            vd = str(ws.cell(row=row, column=12).value or "")  # Verarbeitungsdatum
+            vd = str(ws.cell(row=row, column=config.COL_VERARBEITUNGSDATUM).value or "")
             if vd:
                 try:
                     d = datetime.strptime(vd[:10], "%Y-%m-%d")
@@ -713,7 +838,7 @@ def _pruefe_erinnerungen_intern():
                         letztes_datum = d
                 except ValueError:
                     pass
-            abgl = str(ws.cell(row=row, column=10).value or "")
+            abgl = str(ws.cell(row=row, column=config.COL_ABGEGLICHEN).value or "")
             if abgl != "Ja":
                 unabgeglichen += 1
         wb.close()
