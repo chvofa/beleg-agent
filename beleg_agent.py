@@ -75,7 +75,6 @@ try:
         try:
             t = Notification(app_id="Beleg-Agent", title=title, msg=msg, duration="short")
             if os.path.exists(_TOAST_ICON):
-                t.set_audio(None, suppress=True)
                 t.icon = _TOAST_ICON
             t.show()
         except Exception:
@@ -373,7 +372,7 @@ def pruefe_duplikat_protokoll(daten: dict) -> bool:
         # Fuzzy: gleicher Steller (Teilstring), gleicher Betrag, gleiches Datum
         if (
             (rs_neu in rs_alt or rs_alt in rs_neu)
-            and abs(betrag_alt - betrag_neu) < 0.01
+            and round(betrag_alt, 2) == round(betrag_neu, 2)
             and datum_neu == datum_alt
         ):
             wb.close()

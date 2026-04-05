@@ -2,7 +2,7 @@
 
 Automatische Verarbeitung von Rechnungen und Belegen mit Claude Vision API.
 
-Der Agent ueberwacht einen Inbox-Ordner, extrahiert Rechnungsdaten via KI und legt Belege strukturiert ab. Kreditkarten- und Bank-Transaktionen werden automatisch mit den erfassten Belegen abgeglichen.
+Der Agent ueberwacht einen Inbox-Ordner, extrahiert Rechnungsdaten via KI und legt Belege strukturiert ab. Kreditkarten- und Bank-Transaktionen werden automatisch mit den erfassten Belegen abgeglichen. Unterstuetzt mehrere Banken (UBS, Raiffeisen, PostFinance) und Fremdwaehrungstransaktionen.
 
 ## So funktioniert es
 
@@ -40,8 +40,9 @@ Das Setup fragt interaktiv alles Noetige ab:
 1. Installiert Abhaengigkeiten
 2. Fragt den Anthropic API Key ab und speichert ihn als Windows-Umgebungsvariable
 3. Fragt den Belege-Ordner ab und erstellt die Ordnerstruktur
-4. Richtet optional den Windows-Autostart ein
-5. Bietet an, den Agent direkt zu starten
+4. Fragt die Bank ab (UBS, Raiffeisen oder PostFinance) und optional Kreditkartennummern
+5. Richtet optional den Windows-Autostart ein
+6. Bietet an, den Agent direkt zu starten
 
 ## Ordnerstruktur
 
@@ -121,37 +122,40 @@ Adobe - CHF 674.55 KK CHF.pdf
 Amazon - EUR 49.99 KK EUR.pdf
 Gutschrift Versicherung - CHF 200.00.pdf
 Hosting - USD 29.00.pdf
+AWS - USD 150.00 KK CHF.pdf
 ```
 
 **[PRUEFEN]-Dateien:** Belege mit niedrigem Confidence bleiben in der `_Inbox` mit dem Prefix `[PRUEFEN]_`. Diese manuell pruefen und ggf. umbenennen oder in den richtigen Ordner verschieben.
 
 ### 2. KK-Abgleich (Kreditkarten)
 
-**Was tun:** Kreditkarten-Auszug als CSV (Semikolon-getrennt) in `_Abgleich` legen.
+**Was tun:** Kreditkarten-Auszug als CSV in `_Abgleich` legen.
 
 **Starten:**
 - Tray-Menue > Abgleich > KK-Abgleich starten
 - Oder: `python abgleich.py`
 
 **Was passiert:**
-- CSV wird eingelesen, Waehrung erkannt (KK CHF oder KK EUR)
+- CSV wird eingelesen (Format wird automatisch anhand des Bank-Profils erkannt)
+- Waehrung erkannt (KK CHF oder KK EUR)
 - Jede Transaktion wird mit dem Excel-Protokoll abgeglichen (Betrag + Name + Datum)
 - Passende Belege werden als "Abgeglichen = Ja" markiert
 - Fehlende Zahlungsart wird ergaenzt
 - PayPal-Transaktionen werden erkannt
+- **Fremdwaehrungen:** Bei USD-Rechnungen auf KK CHF/EUR wird der tatsaechlich belastete Betrag (`Betrag_Belastet`) und die Abrechnungswaehrung (`Waehrung_Belastet`) im Protokoll erfasst
 - Transaktionen ohne passenden Beleg werden aufgelistet
 - CSV wird ins `_Abgleich/archiv/` verschoben
 
 ### 3. Bank-Abgleich
 
-**Was tun:** Bankauszug als CSV (Semikolon-getrennt) in `_Abgleich` legen.
+**Was tun:** Bankauszug als CSV in `_Abgleich` legen.
 
 **Starten:**
 - Tray-Menue > Abgleich > Bank-Abgleich starten
 - Oder: `python abgleich_bank.py`
 
 **Was passiert:**
-- CSV wird eingelesen, Waehrung erkannt (CHF oder EUR)
+- CSV wird eingelesen (Format wird automatisch anhand des Bank-Profils erkannt)
 - Belastungen und Gutschriften werden unterschieden
 - Matching wie beim KK-Abgleich, aber mit mehr Datums-Toleranz (bis 45 Tage)
 - Bankgebuehren und KK-Rechnungen werden automatisch uebersprungen
@@ -173,23 +177,27 @@ Hosting - USD 29.00.pdf
 
 ### 5. Excel-Protokoll
 
-Die Datei `Belege_Protokoll.xlsx` ist die zentrale Uebersicht mit folgenden Spalten:
+Die Datei `Belege_Protokoll.xlsx` ist die zentrale Uebersicht. Spaltenreihenfolge: Kerndaten, Finanzen, Abgleich, Bemerkungen, Metadaten.
 
 | Spalte | Beschreibung |
 |--------|--------------|
 | Datum_Rechnung | Rechnungsdatum (YYYY-MM-DD) |
 | Rechnungssteller | Name des Lieferanten |
+| Typ | Rechnung / Gutschrift / Dauerauftrag |
 | Betrag | Rechnungsbetrag |
 | Waehrung | CHF, EUR, USD, etc. |
-| Typ | Rechnung / Gutschrift / Dauerauftrag |
-| Zahlungsart | KK CHF / KK EUR / Ueberweisung / leer |
+| Zahlungsart | KK CHF / KK EUR / Ueberweisung / eBill / leer |
 | PayPal | Ja / Nein |
+| Waehrung_Belastet | KK-Abrechnungswaehrung bei Fremdwaehrung (z.B. CHF bei USD-Rechnung auf KK CHF) |
+| Betrag_Belastet | Tatsaechlich belasteter Betrag in KK-Waehrung (inkl. Wechselkurs) |
+| Abgeglichen | Ja / Nein (wird durch KK/Bank-Abgleich gesetzt) |
+| Bemerkungen | Trinkgeld, Hinweise etc. |
 | Originaldateiname | Urspruenglicher Dateiname |
 | Ablagepfad | Wo die Datei jetzt liegt |
-| Abgeglichen | Ja / Nein (wird durch KK/Bank-Abgleich gesetzt) |
 | Confidence_Score | Wie sicher die KI-Erkennung war |
 | Verarbeitungsdatum | Wann der Beleg verarbeitet wurde |
-| Bemerkungen | Zusaetzliche Infos |
+
+Bestehende Excel-Dateien mit alter Spaltenreihenfolge werden beim Start automatisch migriert (Backup wird erstellt).
 
 ### 6. Erinnerungen
 
@@ -227,6 +235,31 @@ Hilfe                    <-- oeffnet README auf GitHub
 Beenden
 ```
 
+## Bank-Profile
+
+Der Agent unterstuetzt verschiedene Banken mit unterschiedlichen CSV-Formaten:
+
+| Bank | Profil-Name | KK-Auszuege | Bankauszuege |
+|------|-------------|-------------|--------------|
+| UBS | `ubs` | Ja | Ja |
+| Raiffeisen | `raiffeisen` | Ja | Ja |
+| PostFinance | `postfinance` | Ja | Ja |
+
+Das Bank-Profil wird in `config_local.py` konfiguriert:
+
+```python
+BANK_PROFIL = "ubs"  # oder "raiffeisen" / "postfinance"
+```
+
+Optional koennen Kreditkartennummern hinterlegt werden, um die Zahlungsart automatisch zuzuordnen:
+
+```python
+BEKANNTE_KARTEN = {
+    "1234": "KK CHF",
+    "5678": "KK EUR",
+}
+```
+
 ## Konfiguration
 
 Alle Einstellungen in `config.py`:
@@ -238,6 +271,7 @@ Alle Einstellungen in `config.py`:
 | `CONFIDENCE_RUECKFRAGE` | `0.60` | Ab diesem Score: zur Pruefung markieren |
 | `RUECKFRAGE_TIMEOUT_SEKUNDEN` | `60` | Timeout fuer Terminal-Rueckfragen |
 | `ERLAUBTE_ENDUNGEN` | `.pdf .jpg .jpeg .png` | Unterstuetzte Dateiformate |
+| `BANK_PROFIL` | `ubs` | Bank-Profil fuer CSV-Import (siehe oben) |
 
 ## Manuelle Installation
 
@@ -279,8 +313,9 @@ beleg-agent/
   beleg_agent.py          # Hauptagent (Watchdog + Claude Vision + Ablage)
   tray_agent.py           # System Tray Launcher
   config.py               # Allgemeine Konfiguration
-  config_local.py         # Lokale Pfade (nicht im Git)
+  config_local.py         # Lokale Pfade und Bank-Profil (nicht im Git)
   config_local.example.py # Template fuer config_local.py
+  bank_profile.py         # Bank-Profile (UBS, Raiffeisen, PostFinance)
   abgleich.py             # Kreditkarten-Abgleich
   abgleich_bank.py        # Bank-Abgleich
   dauerauftraege.py       # Dauerauftraege erfassen
