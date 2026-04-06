@@ -22,6 +22,11 @@ Der Agent ueberwacht einen Inbox-Ordner, extrahiert Rechnungsdaten via KI und le
         Automatisch   [PRUEFEN]_    [PRUEFEN]_
          abgelegt      markiert      markiert
               |
+        Duplikat erkannt?
+              |
+        [DUPLIKAT]_
+         markiert
+              |
     2026/03_Maerz/
     Firma - CHF 99.90.pdf
               |
@@ -109,7 +114,7 @@ Oder beim Setup mit "Ja" auf die Autostart-Frage antworten.
   - **< 60%** - Datei wird als `[PRUEFEN]_...` markiert
 - Ein Eintrag wird im Excel-Protokoll erstellt
 - Bei bekannten Rechnungsstellern wird die Zahlungsart automatisch aus der Historie uebernommen
-- Duplikate werden erkannt und markiert
+- Duplikate werden erkannt und als `[DUPLIKAT]_...` markiert (koennen geloescht werden)
 
 **Dateinamens-Schema:**
 ```
@@ -125,7 +130,9 @@ Hosting - USD 29.00.pdf
 AWS - USD 150.00 KK CHF.pdf
 ```
 
-**[PRUEFEN]-Dateien:** Belege mit niedrigem Confidence bleiben in der `_Inbox` mit dem Prefix `[PRUEFEN]_`. Diese manuell pruefen und ggf. umbenennen oder in den richtigen Ordner verschieben.
+**[PRUEFEN]-Dateien:** Belege mit niedrigem Confidence bleiben in der `_Inbox` mit dem Prefix `[PRUEFEN]_`. Die Toast-Nachricht zeigt den Grund an (z.B. Confidence-Wert).
+
+**[DUPLIKAT]-Dateien:** Wenn ein Beleg bereits im Protokoll existiert, wird die Datei als `[DUPLIKAT]_...` markiert. Diese koennen bedenkenlos geloescht werden.
 
 ### 2. KK-Abgleich (Kreditkarten)
 
@@ -205,7 +212,7 @@ Der Agent prueft alle 6 Stunden automatisch:
 - Wie lange kein Beleg abgelegt wurde (Warnung nach 14/30 Tagen)
 - Wie viele Belege noch nicht abgeglichen sind
 - Wann der letzte KK/Bank-Abgleich war
-- Ob [PRUEFEN]-Dateien in der Inbox liegen
+- Ob [PRUEFEN]- oder [DUPLIKAT]-Dateien in der Inbox liegen
 - Am Monatsanfang: Erinnerung an eBill/Monatsberichte
 
 ## Tray-Menue
