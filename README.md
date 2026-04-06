@@ -4,6 +4,8 @@ Automatische Verarbeitung von Rechnungen und Belegen mit Claude Vision API.
 
 Der Agent ueberwacht einen Inbox-Ordner, extrahiert Rechnungsdaten via KI und legt Belege strukturiert ab. Kreditkarten- und Bank-Transaktionen werden automatisch mit den erfassten Belegen abgeglichen. Unterstuetzt mehrere Banken (UBS, Raiffeisen, PostFinance) und Fremdwaehrungstransaktionen.
 
+Laeuft auf **Windows** und **macOS**.
+
 ## So funktioniert es
 
 ```
@@ -38,15 +40,16 @@ Der Agent ueberwacht einen Inbox-Ordner, extrahiert Rechnungsdaten via KI und le
 ```bash
 git clone https://github.com/chvofa/beleg-agent.git
 cd beleg-agent
-python setup_beleg_agent.py
+python setup_beleg_agent.py          # Windows
+python3 setup_beleg_agent.py         # macOS
 ```
 
 Das Setup fragt interaktiv alles Noetige ab:
-1. Installiert Abhaengigkeiten
-2. Fragt den Anthropic API Key ab und speichert ihn als Windows-Umgebungsvariable
+1. Installiert Abhaengigkeiten (plattformspezifisch)
+2. Fragt den Anthropic API Key ab und speichert ihn (Windows: Umgebungsvariable, macOS: ~/.zshrc)
 3. Fragt den Belege-Ordner ab und erstellt die Ordnerstruktur
 4. Fragt die Bank ab (UBS, Raiffeisen oder PostFinance) und optional Kreditkartennummern
-5. Richtet optional den Windows-Autostart ein
+5. Richtet optional den Autostart ein (Windows: Startup-Ordner, macOS: LaunchAgent)
 6. Bietet an, den Agent direkt zu starten
 
 ## Ordnerstruktur
@@ -73,7 +76,8 @@ Belege/                          <-- dein gewaehlter Ordner
 
 ### Option A: System Tray (empfohlen)
 
-Doppelklick auf `start_beleg_agent.vbs` - startet den Agent unsichtbar im Hintergrund mit Tray-Icon.
+**Windows:** Doppelklick auf `start_beleg_agent.vbs`
+**macOS:** `./start_beleg_agent.sh` oder `python3 tray_agent.py`
 
 Das Tray-Icon zeigt den Status:
 - Gruen = Agent laeuft
@@ -85,13 +89,14 @@ Rechtsklick auf das Tray-Icon oeffnet das Menue mit allen Funktionen.
 ### Option B: Terminal
 
 ```bash
-python beleg_agent.py
+python beleg_agent.py                # Windows
+python3 beleg_agent.py               # macOS
 ```
 
-### Autostart bei Windows-Start
+### Autostart
 
-1. `Win + R` > `shell:startup`
-2. Verknuepfung zu `start_beleg_agent.vbs` in den Autostart-Ordner legen
+**Windows:** `Win + R` > `shell:startup` > Verknuepfung zu `start_beleg_agent.vbs` ablegen
+**macOS:** LaunchAgent wird vom Setup automatisch eingerichtet (`~/Library/LaunchAgents/com.meocon.beleg-agent.plist`)
 
 Oder beim Setup mit "Ja" auf die Autostart-Frage antworten.
 
@@ -293,20 +298,31 @@ pip install -r requirements.txt
 
 ### 2. API-Key setzen
 
+**Windows (PowerShell):**
 ```powershell
 [Environment]::SetEnvironmentVariable("ANTHROPIC_API_KEY", "sk-ant-...", "User")
+```
+
+**macOS (Terminal):**
+```bash
+echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> ~/.zshrc
+source ~/.zshrc
 ```
 
 ### 3. Lokale Konfiguration erstellen
 
 ```bash
-copy config_local.example.py config_local.py
+cp config_local.example.py config_local.py
 ```
 
 Dann `config_local.py` bearbeiten und den Pfad zu deinem Belege-Ordner anpassen:
 
 ```python
+# Windows:
 ABLAGE_STAMMPFAD = r"C:\Users\DEIN_USER\Pfad\zu\Belege"
+
+# macOS:
+ABLAGE_STAMMPFAD = "/Users/DEIN_USER/Pfad/zu/Belege"
 ```
 
 Unterordner (`_Inbox`, `_Abgleich`, `_Dauerauftraege`) werden automatisch erstellt.
@@ -319,6 +335,7 @@ Unterordner (`_Inbox`, `_Abgleich`, `_Dauerauftraege`) werden automatisch erstel
 beleg-agent/
   beleg_agent.py          # Hauptagent (Watchdog + Claude Vision + Ablage)
   tray_agent.py           # System Tray Launcher
+  platform_utils.py       # Plattform-Abstraktion (Windows/macOS)
   config.py               # Allgemeine Konfiguration
   config_local.py         # Lokale Pfade und Bank-Profil (nicht im Git)
   config_local.example.py # Template fuer config_local.py
@@ -328,8 +345,9 @@ beleg-agent/
   dauerauftraege.py       # Dauerauftraege erfassen
   status.py               # Status-Checker
   setup_beleg_agent.py    # Interaktives Setup
-  start_beleg_agent.bat   # Startskript
-  start_beleg_agent.vbs   # Unsichtbarer Start
+  start_beleg_agent.bat   # Startskript (Windows)
+  start_beleg_agent.vbs   # Unsichtbarer Start (Windows)
+  start_beleg_agent.sh    # Startskript (macOS)
   requirements.txt        # Python-Abhaengigkeiten
 ```
 
