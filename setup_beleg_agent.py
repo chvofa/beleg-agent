@@ -8,6 +8,9 @@ import os
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import platform_utils
+
 
 def frage(text, standard=""):
     """Fragt den Benutzer mit optionalem Standardwert."""
@@ -59,17 +62,7 @@ def main():
     print("[2/5] Anthropic API Key\n")
 
     # Pruefen ob bereits gesetzt
-    bestehender_key = ""
-    try:
-        result = subprocess.run(
-            ["powershell", "-Command",
-             "[Environment]::GetEnvironmentVariable('ANTHROPIC_API_KEY', 'User')"],
-            capture_output=True, text=True,
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-        )
-        bestehender_key = result.stdout.strip()
-    except Exception:
-        pass
+    bestehender_key = platform_utils.get_api_key_from_env()
 
     if bestehender_key:
         maskiert = bestehender_key[:7] + "..." + bestehender_key[-4:]
@@ -85,14 +78,8 @@ def main():
 
     if api_key and api_key != bestehender_key:
         try:
-            subprocess.run(
-                ["powershell", "-Command",
-                 f"[Environment]::SetEnvironmentVariable('ANTHROPIC_API_KEY', '{api_key}', 'User')"],
-                capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-            )
-            os.environ["ANTHROPIC_API_KEY"] = api_key
-            print("  API Key als Windows-Umgebungsvariable gespeichert.\n")
+            meldung = platform_utils.set_api_key_in_env(api_key)
+            print(f"  {meldung}\n")
         except Exception as e:
             print(f"  WARNUNG: Konnte Key nicht setzen: {e}")
             print("  Bitte manuell setzen (siehe README.md)\n")
@@ -125,7 +112,11 @@ def main():
     else:
         print("  Der Belege-Ordner ist der Stammordner fuer alle Belege.")
         print("  Unterordner (_Inbox, _Abgleich, etc.) werden automatisch erstellt.\n")
-        belege_pfad = frage("Pfad zum Belege-Ordner (z.B. C:\\Users\\Max\\Belege)")
+        if sys.platform == "darwin":
+            beispiel = "/Users/Max/Belege"
+        else:
+            beispiel = r"C:\Users\Max\Belege"
+        belege_pfad = frage(f"Pfad zum Belege-Ordner (z.B. {beispiel})")
 
     # ── 3b. Bank-Profil ─────────────────────────────────────────────────
     print("  Welche Bank nutzt du fuer KK- und Bank-Abgleich?\n")
@@ -157,6 +148,9 @@ def main():
         karten[kk2] = "KK EUR"
     print()
 
+    # Tilde expandieren (macOS: ~/Belege → /Users/xyz/Belege)
+    belege_pfad = os.path.expanduser(belege_pfad)
+
     # config_local.py schreiben
     with open(config_local_pfad, "w", encoding="utf-8") as f:
         f.write('"""\n')
@@ -185,22 +179,63 @@ def main():
     # ── 4. Autostart ──────────────────────────────────────────────────────
     print("[4/5] Autostart\n")
 
-    if ja_nein("Soll der Agent automatisch bei Windows-Start starten?"):
-        try:
-            startup_pfad = os.path.join(
-                os.environ.get("APPDATA", ""),
-                r"Microsoft\Windows\Start Menu\Programs\Startup"
-            )
-            vbs_quelle = os.path.join(agent_dir, "start_beleg_agent.vbs")
-            vbs_ziel = os.path.join(startup_pfad, "start_beleg_agent.vbs")
+    if sys.platform == "win32":
+        autostart_frage = "Soll der Agent automatisch bei Windows-Start starten?"
+    else:
+        autostart_frage = "Soll der Agent automatisch bei Mac-Start starten?"
 
-            if os.path.exists(startup_pfad) and os.path.exists(vbs_quelle):
-                import shutil
-                shutil.copy2(vbs_quelle, vbs_ziel)
-                print(f"  Autostart-Verknuepfung erstellt.\n")
-            else:
-                print("  WARNUNG: Startup-Ordner oder VBS-Datei nicht gefunden.")
-                print(f"  Manuell: {vbs_quelle} nach {startup_pfad} kopieren.\n")
+    if ja_nein(autostart_frage):
+        try:
+            if sys.platform == "win32":
+                startup_pfad = os.path.join(
+                    os.environ.get("APPDATA", ""),
+                    r"Microsoft\Windows\Start Menu\Programs\Startup"
+                )
+                vbs_quelle = os.path.join(agent_dir, "start_beleg_agent.vbs")
+                vbs_ziel = os.path.join(startup_pfad, "start_beleg_agent.vbs")
+
+                if os.path.exists(startup_pfad) and os.path.exists(vbs_quelle):
+                    import shutil
+                    shutil.copy2(vbs_quelle, vbs_ziel)
+                    print(f"  Autostart-Verknuepfung erstellt.\n")
+                else:
+                    print("  WARNUNG: Startup-Ordner oder VBS-Datei nicht gefunden.")
+                    print(f"  Manuell: {vbs_quelle} nach {startup_pfad} kopieren.\n")
+            elif sys.platform == "darwin":
+                plist_dir = os.path.expanduser("~/Library/LaunchAgents")
+                os.makedirs(plist_dir, exist_ok=True)
+                plist_pfad = os.path.join(plist_dir, "com.meocon.beleg-agent.plist")
+                python_exe = sys.executable
+                script_pfad = os.path.join(agent_dir, "tray_agent.py")
+                plist_inhalt = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.meocon.beleg-agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{python_exe}</string>
+        <string>{script_pfad}</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>{agent_dir}</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+    </dict>
+</dict>
+</plist>"""
+                with open(plist_pfad, "w") as f:
+                    f.write(plist_inhalt)
+                print(f"  LaunchAgent erstellt: {plist_pfad}")
+                print("  Agent startet automatisch beim naechsten Login.\n")
         except Exception as e:
             print(f"  WARNUNG: Konnte Autostart nicht einrichten: {e}\n")
     else:
@@ -212,8 +247,11 @@ def main():
     print("=" * 58)
     print()
     print("  Starten mit:")
-    print(f"    python {os.path.join(agent_dir, 'beleg_agent.py')}")
-    print("  Oder Doppelklick auf start_beleg_agent.vbs")
+    print(f"    python {os.path.join(agent_dir, 'tray_agent.py')}")
+    if sys.platform == "win32":
+        print("  Oder Doppelklick auf start_beleg_agent.vbs")
+    elif sys.platform == "darwin":
+        print("  Oder: ./start_beleg_agent.sh")
     print()
     print("  Belege in _Inbox legen – der Rest passiert automatisch.")
     print()

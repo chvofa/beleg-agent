@@ -27,6 +27,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 import config
+import platform_utils
 
 # ── Toast Icon ────────────────────────────────────────────────────────────
 _TOAST_ICON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "beleg-agent-icon.png")
@@ -48,10 +49,11 @@ def _erstelle_toast_icon():
             width=max(2, size // 32),
         )
         try:
-            font = ImageFont.truetype("segoeuib.ttf", int(size * 0.5))
+            primary, fallback = platform_utils.get_font_names()
+            font = ImageFont.truetype(primary, int(size * 0.5))
         except Exception:
             try:
-                font = ImageFont.truetype("arial.ttf", int(size * 0.5))
+                font = ImageFont.truetype(fallback, int(size * 0.5))
             except Exception:
                 font = ImageFont.load_default()
         bbox = draw.textbbox((0, 0), "B", font=font)
@@ -66,22 +68,11 @@ def _erstelle_toast_icon():
 
 _erstelle_toast_icon()
 
-# ── Windows Toast Notifications ────────────────────────────────────────────
-try:
-    from winotify import Notification
+# ── Toast-Benachrichtigungen (plattformuebergreifend) ─────────────────────
 
-    def toast(title: str, msg: str):
-        """Sendet Windows Toast-Benachrichtigung."""
-        try:
-            t = Notification(app_id="Beleg-Agent", title=title, msg=msg, duration="short")
-            if os.path.exists(_TOAST_ICON):
-                t.icon = _TOAST_ICON
-            t.show()
-        except Exception:
-            pass  # Notification-Fehler sollen Agent nicht stoppen
-except ImportError:
-    def toast(title: str, msg: str):
-        pass  # winotify nicht installiert, still ignorieren
+def toast(title: str, msg: str):
+    """Sendet Toast-Benachrichtigung (Windows: winotify, macOS: osascript)."""
+    platform_utils.toast(title, msg, _TOAST_ICON)
 
 
 # ── Windows UTF-8 Konsole ─────────────────────────────────────────────────

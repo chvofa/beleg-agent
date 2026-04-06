@@ -4,4 +4,4 @@ openpyxl>=3.1
 Pillow>=10.0
 pypdfium2>=5.0
 pystray>=0.19
-winotify>=1.1
+winotify>=1.1; sys_platform == "win32"

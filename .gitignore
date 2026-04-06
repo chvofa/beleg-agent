@@ -1,4 +1,4 @@
-# ── Lokale Konfiguration (enthaelt persoenliche Pfade) ────────────────────
+# ── Lokale Konfiguration (enthaelt persoenliche Pfade, KK-Nummern) ────────
 config_local.py
 
 # ── Laufzeit-Dateien ──────────────────────────────────────────────────────
@@ -6,6 +6,7 @@ beleg-agent.log
 beleg-agent.status
 beleg-agent.ico
 beleg-agent-icon.png
+*.lock
 __pycache__/
 *.pyc
 
@@ -25,7 +26,18 @@ DOKUMENTATION.txt
 
 # ── Umgebung / IDE ────────────────────────────────────────────────────────
 .env
+.env.*
 .venv/
+venv/
+env/
 *.egg-info/
+dist/
+build/
 .vscode/
 .idea/
+
+# ── OS-spezifische Dateien ───────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+._*

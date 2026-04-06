@@ -9,20 +9,23 @@ import sys
 import threading
 import subprocess
 import time
-import ctypes
 from datetime import datetime
 
 from PIL import Image, ImageDraw, ImageFont
 import pystray
 
+import platform_utils
+
 # ── DPI Awareness (gegen Pixelation auf HiDPI-Displays) ───────────────────
-try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(2)  # Per-Monitor DPI Aware
-except Exception:
+if sys.platform == "win32":
     try:
-        ctypes.windll.user32.SetProcessDPIAware()
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # Per-Monitor DPI Aware
     except Exception:
-        pass
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
 
 # ── Pfade ──────────────────────────────────────────────────────────────────
 AGENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -69,10 +72,11 @@ def erstelle_icon(farbe="green", size=256):
     # "B" in der Mitte
     try:
         font_size = int(size * 0.5)
-        font = ImageFont.truetype("segoeuib.ttf", font_size)  # Segoe UI Bold
+        primary, fallback = platform_utils.get_font_names()
+        font = ImageFont.truetype(primary, font_size)
     except Exception:
         try:
-            font = ImageFont.truetype("arial.ttf", int(size * 0.5))
+            font = ImageFont.truetype(fallback, int(size * 0.5))
         except Exception:
             font = ImageFont.load_default()
 
@@ -91,14 +95,7 @@ def erstelle_icon(farbe="green", size=256):
 _TOAST_ICON = os.path.join(AGENT_DIR, "beleg-agent-icon.png")
 
 def toast(title, msg):
-    try:
-        from winotify import Notification
-        t = Notification(app_id="Beleg-Agent", title=title, msg=msg, duration="short")
-        if os.path.exists(_TOAST_ICON):
-            t.icon = _TOAST_ICON
-        t.show()
-    except Exception:
-        pass
+    platform_utils.toast(title, msg, _TOAST_ICON)
 
 
 # ── Tray Application ──────────────────────────────────────────────────────
@@ -113,18 +110,9 @@ class BelegTray:
 
     def _hole_env(self):
         env = os.environ.copy()
-        try:
-            result = subprocess.run(
-                ["powershell", "-Command",
-                 "[Environment]::GetEnvironmentVariable('ANTHROPIC_API_KEY', 'User')"],
-                capture_output=True, text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-            key = result.stdout.strip()
-            if key:
-                env["ANTHROPIC_API_KEY"] = key
-        except Exception:
-            pass
+        key = platform_utils.get_api_key_from_env()
+        if key:
+            env["ANTHROPIC_API_KEY"] = key
         return env
 
     def start_agent(self):
@@ -136,7 +124,7 @@ class BelegTray:
             env=self._hole_env(),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=platform_utils.SUBPROCESS_FLAGS,
         )
         self.running = True
         self.update_icon("green")
@@ -170,7 +158,7 @@ class BelegTray:
                     capture_output=True, text=True,
                     encoding="utf-8", errors="replace",
                     timeout=300,
-                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    creationflags=platform_utils.SUBPROCESS_FLAGS,
                 )
                 output = result.stdout.strip()
                 zeilen = output.split("\n")
@@ -225,7 +213,7 @@ class BelegTray:
             [PYTHON_EXE, os.path.join(AGENT_DIR, "tray_agent.py")],
             cwd=AGENT_DIR,
             env=self._hole_env(),
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=platform_utils.SUBPROCESS_FLAGS,
         )
         icon.stop()
 
@@ -239,19 +227,19 @@ class BelegTray:
         self._run_script(DAUERAUFTRAEGE_SCRIPT, "Dauerauftraege")
 
     def on_open_inbox(self, icon, item):
-        os.startfile(os.path.normpath(INBOX_PFAD))
+        platform_utils.open_file(INBOX_PFAD)
 
     def on_open_excel(self, icon, item):
-        os.startfile(os.path.normpath(EXCEL_PFAD))
+        platform_utils.open_file(EXCEL_PFAD)
 
     def on_open_abgleich(self, icon, item):
-        os.startfile(os.path.normpath(ABGLEICH_PFAD))
+        platform_utils.open_file(ABGLEICH_PFAD)
 
     def on_open_dauerauftraege(self, icon, item):
-        os.startfile(os.path.normpath(DAUERAUFTRAEGE_PFAD))
+        platform_utils.open_file(DAUERAUFTRAEGE_PFAD)
 
     def on_open_log(self, icon, item):
-        os.startfile(os.path.normpath(LOG_DATEI))
+        platform_utils.open_file(LOG_DATEI)
 
     def on_hilfe(self, icon, item):
         import webbrowser

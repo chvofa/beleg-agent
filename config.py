@@ -29,6 +29,7 @@ except ImportError:
     BANK_PROFIL = "ubs"  # Standard-Bankprofil
 
 # ── Pfade (abgeleitet aus ABLAGE_STAMMPFAD) ───────────────────────────────
+ABLAGE_STAMMPFAD = os.path.expanduser(ABLAGE_STAMMPFAD)
 INBOX_PFAD = os.path.join(ABLAGE_STAMMPFAD, "_Inbox")
 
 EXCEL_PROTOKOLL = os.path.join(ABLAGE_STAMMPFAD, "Belege_Protokoll.xlsx")

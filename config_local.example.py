@@ -3,7 +3,10 @@ Lokale Konfiguration – kopiere diese Datei nach config_local.py und passe die 
 """
 
 # Stammpfad zur Belege-Ablage (enthält _Inbox, _Abgleich, _Dauerauftraege, etc.)
+# Windows:
 ABLAGE_STAMMPFAD = r"C:\Users\DEIN_USER\Pfad\zu\Belege"
+# macOS:
+# ABLAGE_STAMMPFAD = "/Users/DEIN_USER/Pfad/zu/Belege"
 
 # Optional: Bekannte Kreditkarten (letzte 4 Ziffern → KK-Typ)
 # Hilft dem Vision-Modell, die Zahlungsart automatisch zu erkennen.
