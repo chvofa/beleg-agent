@@ -398,88 +398,88 @@ def migriere_excel_spalten():
         return
 
     try:
-        wb = openpyxl.load_workbook(config.EXCEL_PROTOKOLL)
-    except PermissionError:
-        log.warning("Excel ist geöffnet — Migration übersprungen.")
-        return
+        with config.excel_lock():
+            try:
+                wb = openpyxl.load_workbook(config.EXCEL_PROTOKOLL)
+            except PermissionError:
+                log.warning("Excel ist geöffnet — Migration übersprungen.")
+                return
 
-    ws = wb.active
-    header_3 = str(ws.cell(row=1, column=3).value or "")
+            ws = wb.active
+            header_3 = str(ws.cell(row=1, column=3).value or "")
 
-    if header_3 == "Typ":
-        # Bereits neue Struktur — nur fehlende Spalten ergänzen
-        aktuelle = ws.max_column or 0
-        erwartete = len(config.EXCEL_SPALTEN)
-        if aktuelle < erwartete:
-            for col_idx in range(aktuelle + 1, erwartete + 1):
-                ws.cell(row=1, column=col_idx).value = config.EXCEL_SPALTEN[col_idx - 1]
-            wb.save(config.EXCEL_PROTOKOLL)
-            log.info(f"Neue Spalten ergänzt: {config.EXCEL_SPALTEN[aktuelle:]}")
-        wb.close()
-        return
+            if header_3 == "Typ":
+                # Bereits neue Struktur — nur fehlende Spalten ergänzen
+                aktuelle = ws.max_column or 0
+                erwartete = len(config.EXCEL_SPALTEN)
+                if aktuelle < erwartete:
+                    for col_idx in range(aktuelle + 1, erwartete + 1):
+                        ws.cell(row=1, column=col_idx).value = config.EXCEL_SPALTEN[col_idx - 1]
+                    wb.save(config.EXCEL_PROTOKOLL)
+                    log.info(f"Neue Spalten ergänzt: {config.EXCEL_SPALTEN[aktuelle:]}")
+                wb.close()
+                return
 
-    if header_3 != "Betrag":
-        wb.close()
-        log.warning(f"Unbekannte Excel-Struktur (Spalte 3 = '{header_3}'), Migration übersprungen.")
-        return
+            if header_3 != "Betrag":
+                wb.close()
+                log.warning(f"Unbekannte Excel-Struktur (Spalte 3 = '{header_3}'), Migration übersprungen.")
+                return
 
-    log.info("Alte Excel-Struktur erkannt — starte automatische Migration...")
+            log.info("Alte Excel-Struktur erkannt — starte automatische Migration...")
 
-    # Mapping: alte Spalte → neue Spalte
-    # Alt:  1=Datum, 2=RS, 3=Betrag, 4=Währ, 5=Typ, 6=ZA, 7=PP, 8=Orig, 9=Pfad,
-    #       10=Abgl, 11=Conf, 12=Verarb, 13=Bem, 14=W_Bel, 15=B_Bel
-    # Neu:  1=Datum, 2=RS, 3=Typ, 4=Betrag, 5=Währ, 6=ZA, 7=PP, 8=W_Bel, 9=B_Bel,
-    #       10=Abgl, 11=Bem, 12=Orig, 13=Pfad, 14=Conf, 15=Verarb
-    ALT_ZU_NEU = {
-        1: 1, 2: 2, 3: 4, 4: 5, 5: 3, 6: 6, 7: 7, 8: 12, 9: 13,
-        10: 10, 11: 14, 12: 15, 13: 11, 14: 8, 15: 9,
-    }
+            # Mapping: alte Spalte → neue Spalte
+            ALT_ZU_NEU = {
+                1: 1, 2: 2, 3: 4, 4: 5, 5: 3, 6: 6, 7: 7, 8: 12, 9: 13,
+                10: 10, 11: 14, 12: 15, 13: 11, 14: 8, 15: 9,
+            }
 
-    # Alle Daten auslesen
-    max_row = ws.max_row
-    max_col = ws.max_column or 15
-    alte_daten = []
-    for row in range(2, max_row + 1):
-        zeile = {}
-        for col in range(1, max_col + 1):
-            zeile[col] = ws.cell(row=row, column=col).value
-        alte_daten.append(zeile)
+            # Alle Daten auslesen
+            max_row = ws.max_row
+            max_col = ws.max_column or 15
+            alte_daten = []
+            for row in range(2, max_row + 1):
+                zeile = {}
+                for col in range(1, max_col + 1):
+                    zeile[col] = ws.cell(row=row, column=col).value
+                alte_daten.append(zeile)
 
-    wb.close()
+            wb.close()
 
-    # Backup
-    import shutil
-    from datetime import datetime as dt
-    backup = config.EXCEL_PROTOKOLL.replace(".xlsx", f"_pre_migration.xlsx")
-    shutil.copy2(config.EXCEL_PROTOKOLL, backup)
-    log.info(f"Backup erstellt: {backup}")
+            # Backup
+            import shutil
+            from datetime import datetime as dt
+            backup = config.EXCEL_PROTOKOLL.replace(".xlsx", f"_pre_migration.xlsx")
+            shutil.copy2(config.EXCEL_PROTOKOLL, backup)
+            log.info(f"Backup erstellt: {backup}")
 
-    # Neues Workbook schreiben
-    wb_neu = openpyxl.Workbook()
-    ws_neu = wb_neu.active
-    ws_neu.title = "Belege"
+            # Neues Workbook schreiben
+            wb_neu = openpyxl.Workbook()
+            ws_neu = wb_neu.active
+            ws_neu.title = "Belege"
 
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="2F5496", end_color="2F5496", fill_type="solid")
+            header_font = Font(bold=True, color="FFFFFF")
+            header_fill = PatternFill(start_color="2F5496", end_color="2F5496", fill_type="solid")
 
-    for col_idx, name in enumerate(config.EXCEL_SPALTEN, start=1):
-        zelle = ws_neu.cell(row=1, column=col_idx, value=name)
-        zelle.font = header_font
-        zelle.fill = header_fill
+            for col_idx, name in enumerate(config.EXCEL_SPALTEN, start=1):
+                zelle = ws_neu.cell(row=1, column=col_idx, value=name)
+                zelle.font = header_font
+                zelle.fill = header_fill
 
-    for zeile_idx, alte_zeile in enumerate(alte_daten, start=2):
-        for alt_col, neu_col in ALT_ZU_NEU.items():
-            ws_neu.cell(row=zeile_idx, column=neu_col, value=alte_zeile.get(alt_col))
+            for zeile_idx, alte_zeile in enumerate(alte_daten, start=2):
+                for alt_col, neu_col in ALT_ZU_NEU.items():
+                    ws_neu.cell(row=zeile_idx, column=neu_col, value=alte_zeile.get(alt_col))
 
-    # Spaltenbreiten
-    breiten = {1: 14, 2: 30, 3: 12, 4: 12, 5: 10, 6: 14, 7: 8,
-               8: 10, 9: 14, 10: 12, 11: 40, 12: 30, 13: 80, 14: 10, 15: 20}
-    for col, breite in breiten.items():
-        ws_neu.column_dimensions[openpyxl.utils.get_column_letter(col)].width = breite
+            # Spaltenbreiten
+            breiten = {1: 14, 2: 30, 3: 12, 4: 12, 5: 10, 6: 14, 7: 8,
+                       8: 10, 9: 14, 10: 12, 11: 40, 12: 30, 13: 80, 14: 10, 15: 20}
+            for col, breite in breiten.items():
+                ws_neu.column_dimensions[openpyxl.utils.get_column_letter(col)].width = breite
 
-    wb_neu.save(config.EXCEL_PROTOKOLL)
-    wb_neu.close()
-    log.info(f"Migration abgeschlossen: {len(alte_daten)} Zeilen umstrukturiert.")
+            wb_neu.save(config.EXCEL_PROTOKOLL)
+            wb_neu.close()
+            log.info(f"Migration abgeschlossen: {len(alte_daten)} Zeilen umstrukturiert.")
+    except TimeoutError:
+        log.warning("Excel-Lock nicht verfuegbar — Migration übersprungen.")
 
 
 def erstelle_excel_wenn_noetig():
@@ -519,30 +519,31 @@ def schreibe_protokoll(daten: dict, original_name: str, ablagepfad: str):
     erstelle_excel_wenn_noetig()
 
     try:
-        wb = openpyxl.load_workbook(config.EXCEL_PROTOKOLL)
-        ws = wb.active
+        with config.excel_lock():
+            wb = openpyxl.load_workbook(config.EXCEL_PROTOKOLL)
+            ws = wb.active
 
-        neue_zeile = [
-            daten.get("rechnungsdatum", ""),                # 1  Datum_Rechnung
-            daten.get("rechnungssteller", ""),               # 2  Rechnungssteller
-            daten.get("typ", "Rechnung"),                    # 3  Typ
-            daten.get("betrag", 0),                          # 4  Betrag
-            daten.get("waehrung", ""),                        # 5  Währung
-            daten.get("zahlungsart", ""),                     # 6  Zahlungsart
-            "Ja" if daten.get("ist_paypal") else "Nein",     # 7  PayPal
-            "",                                               # 8  Währung_Belastet
-            "",                                               # 9  Betrag_Belastet
-            "Nein",                                           # 10 Abgeglichen
-            daten.get("bemerkungen", ""),                     # 11 Bemerkungen
-            original_name,                                    # 12 Originaldateiname
-            ablagepfad,                                       # 13 Ablagepfad
-            daten.get("gesamt_confidence", 0),                # 14 Confidence_Score
-            datetime.now().strftime("%Y-%m-%d %H:%M"),        # 15 Verarbeitungsdatum
-        ]
-        ws.append(neue_zeile)
-        wb.save(config.EXCEL_PROTOKOLL)
-        wb.close()
-        log.info("Protokoll-Eintrag geschrieben.")
+            neue_zeile = [
+                daten.get("rechnungsdatum", ""),                # 1  Datum_Rechnung
+                daten.get("rechnungssteller", ""),               # 2  Rechnungssteller
+                daten.get("typ", "Rechnung"),                    # 3  Typ
+                daten.get("betrag", 0),                          # 4  Betrag
+                daten.get("waehrung", ""),                        # 5  Währung
+                daten.get("zahlungsart", ""),                     # 6  Zahlungsart
+                "Ja" if daten.get("ist_paypal") else "Nein",     # 7  PayPal
+                "",                                               # 8  Währung_Belastet
+                "",                                               # 9  Betrag_Belastet
+                "Nein",                                           # 10 Abgeglichen
+                daten.get("bemerkungen", ""),                     # 11 Bemerkungen
+                original_name,                                    # 12 Originaldateiname
+                ablagepfad,                                       # 13 Ablagepfad
+                daten.get("gesamt_confidence", 0),                # 14 Confidence_Score
+                datetime.now().strftime("%Y-%m-%d %H:%M"),        # 15 Verarbeitungsdatum
+            ]
+            ws.append(neue_zeile)
+            wb.save(config.EXCEL_PROTOKOLL)
+            wb.close()
+            log.info("Protokoll-Eintrag geschrieben.")
     except Exception as e:
         log.error(f"Fehler beim Schreiben ins Excel-Protokoll: {e}")
         log.error("Ablage wird trotzdem durchgeführt.")
@@ -620,7 +621,7 @@ def terminal_rueckfrage(daten: dict, dateiname: str) -> dict | None:
         return None
 
 
-def markiere_als_pruefen(dateipfad: str) -> str:
+def markiere_als_pruefen(dateipfad: str, grund: str = "") -> str:
     """Benennt die Datei mit [PRÜFEN]-Prefix um."""
     ordner = os.path.dirname(dateipfad)
     name = os.path.basename(dateipfad)
@@ -631,8 +632,24 @@ def markiere_als_pruefen(dateipfad: str) -> str:
     neuer_name = f"[PRÜFEN]_{name}"
     neuer_pfad = os.path.join(ordner, neuer_name)
     os.rename(dateipfad, neuer_pfad)
-    log.info(f"Markiert als [PRÜFEN]: {neuer_name}")
-    toast("Beleg prüfen", f"{name} - bitte manuell prüfen in _Inbox")
+    log.info(f"Markiert als [PRÜFEN]: {neuer_name} — Grund: {grund or 'unbekannt'}")
+    grund_text = f" ({grund})" if grund else ""
+    toast("Beleg prüfen", f"{name}{grund_text}")
+    return neuer_pfad
+
+
+def markiere_als_duplikat(dateipfad: str) -> str:
+    """Benennt die Datei mit [DUPLIKAT]-Prefix um."""
+    ordner = os.path.dirname(dateipfad)
+    name = os.path.basename(dateipfad)
+
+    if name.startswith("[DUPLIKAT]_"):
+        return dateipfad
+
+    neuer_name = f"[DUPLIKAT]_{name}"
+    neuer_pfad = os.path.join(ordner, neuer_name)
+    os.rename(dateipfad, neuer_pfad)
+    log.info(f"Markiert als [DUPLIKAT]: {neuer_name}")
     return neuer_pfad
 
 
@@ -657,8 +674,8 @@ def lege_datei_ab(dateipfad: str, daten: dict) -> bool:
             f"Mögliches Duplikat im Protokoll: "
             f"{daten['rechnungssteller']} / {daten['betrag']} / {daten['rechnungsdatum']}"
         )
-        toast("Duplikat erkannt", f"{daten['rechnungssteller']} {daten['waehrung']} {daten['betrag']:.2f} - als [PRÜFEN] markiert")
-        markiere_als_pruefen(dateipfad)
+        toast("Duplikat erkannt", f"{daten['rechnungssteller']} {daten['waehrung']} {daten['betrag']:.2f} - bereits abgelegt")
+        markiere_als_duplikat(dateipfad)
         return False
 
     # Ordner erstellen und Datei verschieben
@@ -695,7 +712,7 @@ def verarbeite_datei(dateipfad: str):
     dateiname = os.path.basename(dateipfad)
 
     # Bereits markierte Dateien überspringen
-    if dateiname.startswith("[PRÜFEN]_"):
+    if dateiname.startswith("[PRÜFEN]_") or dateiname.startswith("[DUPLIKAT]_"):
         return
 
     log.info(f"Verarbeite: {dateiname}")
@@ -730,12 +747,12 @@ def verarbeite_datei(dateipfad: str):
         rs = daten.get('rechnungssteller', '?')
         betrag = daten.get('betrag', 0)
         waehrung = daten.get('waehrung', '')
-        toast("Beleg prüfen", f"{rs} - {waehrung} {betrag:.2f} (Confidence {confidence:.0%}) → _Inbox prüfen")
-        markiere_als_pruefen(dateipfad)
+        toast("Beleg prüfen", f"{rs} - {waehrung} {betrag:.2f} (Confidence {confidence:.0%})")
+        markiere_als_pruefen(dateipfad, grund=f"Confidence {confidence:.0%}")
 
     else:
         log.warning(f"Confidence {confidence:.1%} < {config.CONFIDENCE_RÜCKFRAGE:.0%} → [PRÜFEN]")
-        markiere_als_pruefen(dateipfad)
+        markiere_als_pruefen(dateipfad, grund=f"Confidence {confidence:.0%} zu niedrig")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -791,6 +808,7 @@ def verarbeite_bestehende_dateien():
         f for f in os.listdir(config.INBOX_PFAD)
         if Path(f).suffix.lower() in config.ERLAUBTE_ENDUNGEN
         and not f.startswith("[PRÜFEN]_")
+        and not f.startswith("[DUPLIKAT]_")
     ]
 
     if dateien:
@@ -875,12 +893,16 @@ def _pruefe_erinnerungen_intern():
                 toast("Bank-Abgleich fällig",
                       f"Letzter Bank-Abgleich vor {int(tage_seit_bank)} Tagen. Neue Auszüge ablegen?")
 
-    # 4. [PRÜFEN]-Dateien in Inbox
+    # 4. [PRÜFEN]- und [DUPLIKAT]-Dateien in Inbox
     if os.path.exists(config.INBOX_PFAD):
         pruefen = [f for f in os.listdir(config.INBOX_PFAD) if f.startswith("[PRÜFEN]_")]
+        duplikate = [f for f in os.listdir(config.INBOX_PFAD) if f.startswith("[DUPLIKAT]_")]
         if pruefen:
             toast("Belege prüfen",
-                  f"{len(pruefen)} Beleg(e) in der Inbox warten auf manuelle Prüfung")
+                  f"{len(pruefen)} Beleg(e) in der Inbox warten auf Prüfung")
+        if duplikate:
+            toast("Duplikate in Inbox",
+                  f"{len(duplikate)} Duplikat(e) in der Inbox - können gelöscht werden")
 
     # 5. Monatsanfang: Erinnerung an eBill/Dauerauftraege
     if jetzt.day <= 3:

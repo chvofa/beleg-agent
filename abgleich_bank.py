@@ -195,6 +195,10 @@ def match_bank_transaktion(trans: dict, belege: list[dict]) -> dict | None:
     t_waehrung = trans["waehrung"].upper() if trans.get("waehrung") else ""
 
     for beleg in belege:
+        # Bereits abgeglichene Belege ueberspringen
+        if beleg["abgeglichen"] == "Ja":
+            continue
+
         b_betrag = beleg["betrag"]
         b_datum = beleg["datum"]
         b_rs = beleg["rechnungssteller"].upper()
@@ -300,111 +304,116 @@ def main():
 
     print(f"Gefunden: {len(csv_dateien)} Bank-CSV-Datei(en)\n")
 
-    # Excel laden + Struktur pruefen
-    wb = openpyxl.load_workbook(config.EXCEL_PROTOKOLL)
-    ws = wb.active
-    header_3 = str(ws.cell(row=1, column=3).value or "")
-    if header_3 == "Betrag":
-        print("FEHLER: Excel hat die alte Spaltenstruktur!")
-        print("Bitte zuerst den Beleg-Agent starten — er migriert das Excel automatisch.")
-        wb.close()
-        return
-    # Fehlende Spalten ergaenzen
-    aktuelle_spalten = ws.max_column or 0
-    erwartete_spalten = len(config.EXCEL_SPALTEN)
-    if aktuelle_spalten < erwartete_spalten:
-        for col_idx in range(aktuelle_spalten + 1, erwartete_spalten + 1):
-            ws.cell(row=1, column=col_idx).value = config.EXCEL_SPALTEN[col_idx - 1]
+    # Excel laden + Struktur pruefen (mit Lock um Race Conditions zu verhindern)
+    try:
+        with config.excel_lock():
+            wb = openpyxl.load_workbook(config.EXCEL_PROTOKOLL)
+            ws = wb.active
+            header_3 = str(ws.cell(row=1, column=3).value or "")
+            if header_3 == "Betrag":
+                print("FEHLER: Excel hat die alte Spaltenstruktur!")
+                print("Bitte zuerst den Beleg-Agent starten — er migriert das Excel automatisch.")
+                wb.close()
+                return
+            # Fehlende Spalten ergaenzen
+            aktuelle_spalten = ws.max_column or 0
+            erwartete_spalten = len(config.EXCEL_SPALTEN)
+            if aktuelle_spalten < erwartete_spalten:
+                for col_idx in range(aktuelle_spalten + 1, erwartete_spalten + 1):
+                    ws.cell(row=1, column=col_idx).value = config.EXCEL_SPALTEN[col_idx - 1]
 
-    belege = []
-    for row_idx in range(2, ws.max_row + 1):
-        datum_str = str(ws.cell(row=row_idx, column=config.COL_DATUM).value or "").strip()
-        try:
-            datum = datetime.strptime(datum_str, "%Y-%m-%d").date()
-        except ValueError:
-            datum = None
-        try:
-            betrag = float(ws.cell(row=row_idx, column=config.COL_BETRAG).value or 0)
-        except (ValueError, TypeError):
-            betrag = 0
+            belege = []
+            for row_idx in range(2, ws.max_row + 1):
+                datum_str = str(ws.cell(row=row_idx, column=config.COL_DATUM).value or "").strip()
+                try:
+                    datum = datetime.strptime(datum_str, "%Y-%m-%d").date()
+                except ValueError:
+                    datum = None
+                try:
+                    betrag = float(ws.cell(row=row_idx, column=config.COL_BETRAG).value or 0)
+                except (ValueError, TypeError):
+                    betrag = 0
 
-        belege.append({
-            "row": row_idx,
-            "datum": datum,
-            "rechnungssteller": str(ws.cell(row=row_idx, column=config.COL_RECHNUNGSSTELLER).value or "").strip(),
-            "betrag": betrag,
-            "waehrung": str(ws.cell(row=row_idx, column=config.COL_WAEHRUNG).value or "").strip(),
-            "typ": str(ws.cell(row=row_idx, column=config.COL_TYP).value or "Rechnung").strip(),
-            "zahlungsart": str(ws.cell(row=row_idx, column=config.COL_ZAHLUNGSART).value or "").strip(),
-            "abgeglichen": str(ws.cell(row=row_idx, column=config.COL_ABGEGLICHEN).value or "").strip(),
-        })
-
-    gesamt_matches = 0
-    gesamt_neu_za = 0
-    ohne_beleg_liste = []
-
-    for datei in sorted(csv_dateien):
-        pfad = os.path.join(abgleich_pfad, datei)
-        waehrung = erkenne_bank_typ(pfad)
-        bank_typ = f"Bank {waehrung}"
-
-        print(f"--- {bank_typ} ({datei}) ---")
-        waehrung_csv, transaktionen = lade_bank_transaktionen(pfad)
-
-        # Nur Transaktionen ab letztem Jahr
-        import datetime as _dt
-        min_jahr = _dt.date.today().year - 1
-        trans_aktuell = [t for t in transaktionen if t["datum"] and t["datum"].year >= min_jahr]
-        print(f"  {len(transaktionen)} Transaktionen total, {len(trans_aktuell)} ab {min_jahr}\n")
-
-        for trans in trans_aktuell:
-            match = match_bank_transaktion(trans, belege)
-
-            datum_str = trans["datum"].strftime("%d.%m.%Y") if trans["datum"] else "?"
-            gs = "+" if trans["ist_gutschrift"] else "-"
-            beschr_kurz = trans["beschreibung"][:50]
-
-            if match:
-                bereits = match["abgeglichen"] == "Ja"
-                if bereits:
-                    continue
-
-                row = match["row"]
-                ws.cell(row=row, column=config.COL_ABGEGLICHEN).value = "Ja"
-
-                alte_za = ws.cell(row=row, column=config.COL_ZAHLUNGSART).value or ""
-                if not alte_za:
-                    ws.cell(row=row, column=config.COL_ZAHLUNGSART).value = "Überweisung"
-                    gesamt_neu_za += 1
-                    za_info = " [Zahlungsart -> Überweisung]"
-                else:
-                    za_info = ""
-
-                match["abgeglichen"] = "Ja"
-
-                print(f"  NEU:  {datum_str} {gs}{trans['betrag']:>10.2f} {waehrung}  {beschr_kurz}")
-                print(f"        -> {match['rechnungssteller']} ({match['waehrung']} {match['betrag']}){za_info}")
-                gesamt_matches += 1
-            else:
-                ohne_beleg_liste.append({
-                    "bank": bank_typ,
-                    "datum": datum_str,
-                    "betrag": trans["betrag"],
-                    "gs": gs,
-                    "text": beschr_kurz,
+                belege.append({
+                    "row": row_idx,
+                    "datum": datum,
+                    "rechnungssteller": str(ws.cell(row=row_idx, column=config.COL_RECHNUNGSSTELLER).value or "").strip(),
+                    "betrag": betrag,
+                    "waehrung": str(ws.cell(row=row_idx, column=config.COL_WAEHRUNG).value or "").strip(),
+                    "typ": str(ws.cell(row=row_idx, column=config.COL_TYP).value or "Rechnung").strip(),
+                    "zahlungsart": str(ws.cell(row=row_idx, column=config.COL_ZAHLUNGSART).value or "").strip(),
+                    "abgeglichen": str(ws.cell(row=row_idx, column=config.COL_ABGEGLICHEN).value or "").strip(),
                 })
 
-        print()
+            gesamt_matches = 0
+            gesamt_neu_za = 0
+            ohne_beleg_liste = []
 
-    # Speichern
-    try:
-        wb.save(config.EXCEL_PROTOKOLL)
-    except PermissionError:
-        print("\nFEHLER: Excel-Datei ist geöffnet! Bitte schliessen und erneut versuchen.")
-        print(f"  {config.EXCEL_PROTOKOLL}")
-        wb.close()
+            for datei in sorted(csv_dateien):
+                pfad = os.path.join(abgleich_pfad, datei)
+                waehrung = erkenne_bank_typ(pfad)
+                bank_typ = f"Bank {waehrung}"
+
+                print(f"--- {bank_typ} ({datei}) ---")
+                waehrung_csv, transaktionen = lade_bank_transaktionen(pfad)
+
+                # Nur Transaktionen ab letztem Jahr
+                import datetime as _dt
+                min_jahr = _dt.date.today().year - 1
+                trans_aktuell = [t for t in transaktionen if t["datum"] and t["datum"].year >= min_jahr]
+                print(f"  {len(transaktionen)} Transaktionen total, {len(trans_aktuell)} ab {min_jahr}\n")
+
+                for trans in trans_aktuell:
+                    match = match_bank_transaktion(trans, belege)
+
+                    datum_str = trans["datum"].strftime("%d.%m.%Y") if trans["datum"] else "?"
+                    gs = "+" if trans["ist_gutschrift"] else "-"
+                    beschr_kurz = trans["beschreibung"][:50]
+
+                    if match:
+                        bereits = match["abgeglichen"] == "Ja"
+                        if bereits:
+                            continue
+
+                        row = match["row"]
+                        ws.cell(row=row, column=config.COL_ABGEGLICHEN).value = "Ja"
+
+                        alte_za = ws.cell(row=row, column=config.COL_ZAHLUNGSART).value or ""
+                        if not alte_za:
+                            ws.cell(row=row, column=config.COL_ZAHLUNGSART).value = "Überweisung"
+                            gesamt_neu_za += 1
+                            za_info = " [Zahlungsart -> Überweisung]"
+                        else:
+                            za_info = ""
+
+                        match["abgeglichen"] = "Ja"
+
+                        print(f"  NEU:  {datum_str} {gs}{trans['betrag']:>10.2f} {waehrung}  {beschr_kurz}")
+                        print(f"        -> {match['rechnungssteller']} ({match['waehrung']} {match['betrag']}){za_info}")
+                        gesamt_matches += 1
+                    else:
+                        ohne_beleg_liste.append({
+                            "bank": bank_typ,
+                            "datum": datum_str,
+                            "betrag": trans["betrag"],
+                            "gs": gs,
+                            "text": beschr_kurz,
+                        })
+
+                print()
+
+            # Speichern
+            try:
+                wb.save(config.EXCEL_PROTOKOLL)
+            except PermissionError:
+                print("\nFEHLER: Excel-Datei ist geöffnet! Bitte schliessen und erneut versuchen.")
+                print(f"  {config.EXCEL_PROTOKOLL}")
+                wb.close()
+                return
+            wb.close()
+    except TimeoutError as e:
+        print(f"\nFEHLER: {e}")
         return
-    wb.close()
 
     # Archivieren
     datum_str = datetime.now().strftime("%Y-%m-%d")

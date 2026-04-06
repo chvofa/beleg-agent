@@ -175,6 +175,10 @@ def match_transaktion_zu_beleg(trans: dict, belege: list[dict], kk_typ: str) -> 
     beste_matches = []
 
     for beleg in belege:
+        # Bereits abgeglichene Belege ueberspringen
+        if beleg["abgeglichen"] == "Ja":
+            continue
+
         b_betrag = beleg["betrag"]
         b_datum = beleg["datum"]
         b_rs = beleg["rechnungssteller"].upper()
@@ -261,107 +265,112 @@ def main():
 
     print()
 
-    # 3. Excel laden
-    wb, belege = lade_excel_belege()
-    ws = wb.active
-
-    gesamt_matches = 0
-    gesamt_ohne_beleg = 0
-    gesamt_neu_za = 0
-    ohne_beleg_liste = []
-
-    for kk_typ, csv_pfad in sorted(kk_dateien.items()):
-        print(f"--- {kk_typ} ---")
-        transaktionen = lade_csv_transaktionen(csv_pfad)
-
-        # Nur Transaktionen ab letztem Jahr (passend zu unseren Belegen)
-        import datetime as _dt
-        min_jahr = _dt.date.today().year - 1
-        trans_aktuell = [t for t in transaktionen if t["datum"] and t["datum"].year >= min_jahr]
-        print(f"  {len(transaktionen)} Transaktionen total, {len(trans_aktuell)} ab {min_jahr}\n")
-
-        for trans in trans_aktuell:
-            # Gebuehren/Zuschlaege ueberspringen
-            if not trans["buchungstext"] or "ZUSCHLAG" in trans["buchungstext"].upper():
-                continue
-
-            match = match_transaktion_zu_beleg(trans, belege, kk_typ)
-
-            datum_str = trans["datum"].strftime("%d.%m.%Y") if trans["datum"] else "?"
-            orig_w = trans["orig_waehrung"] or trans["kk_waehrung"]
-
-            if match:
-                row = match["row"]
-                bereits = match["abgeglichen"] == "Ja"
-
-                if bereits:
-                    # Schon abgeglichen - still ueberspringen
-                    continue
-
-                # Match gefunden -> Abgeglichen = Ja
-                ws.cell(row=row, column=config.COL_ABGEGLICHEN).value = "Ja"
-
-                # Zahlungsart ergaenzen wenn leer
-                alte_za = ws.cell(row=row, column=config.COL_ZAHLUNGSART).value or ""
-                if not alte_za:
-                    ws.cell(row=row, column=config.COL_ZAHLUNGSART).value = kk_typ
-                    gesamt_neu_za += 1
-                    za_info = f" [Zahlungsart -> {kk_typ}]"
-                else:
-                    za_info = ""
-
-                # PayPal ergaenzen
-                if "PAYPAL" in trans["buchungstext"].upper():
-                    ws.cell(row=row, column=config.COL_PAYPAL).value = "Ja"
-
-                # Fremdwaehrung: Belastungsbetrag + KK-Waehrung ins Excel schreiben
-                fx_info = ""
-                t_orig_w = trans["orig_waehrung"].upper() if trans["orig_waehrung"] else ""
-                t_kk_w = trans["kk_waehrung"].upper() if trans["kk_waehrung"] else ""
-                if t_orig_w and t_kk_w and t_orig_w != t_kk_w:
-                    # Fremdwaehrungstransaktion
-                    belastung_str = trans["belastung"]
-                    if belastung_str:
-                        try:
-                            belastung = float(belastung_str.replace(",", "."))
-                            ws.cell(row=row, column=config.COL_WAEHRUNG_BELASTET).value = t_kk_w
-                            ws.cell(row=row, column=config.COL_BETRAG_BELASTET).value = belastung
-                            fx_info = f" [FX: {t_kk_w} {belastung:.2f}]"
-                        except ValueError:
-                            pass
-                    else:
-                        # Pending-Transaktion: Kurs/Belastung noch nicht bekannt
-                        ws.cell(row=row, column=config.COL_WAEHRUNG_BELASTET).value = t_kk_w
-                        fx_info = f" [FX: {t_kk_w} pending]"
-
-                # Beleg als abgeglichen markieren (in-memory auch updaten)
-                match["abgeglichen"] = "Ja"
-
-                print(f"  NEU:  {datum_str} {orig_w} {trans['betrag']:>10.2f}  {trans['buchungstext'][:40]}")
-                print(f"        -> {match['rechnungssteller']} ({match['waehrung']} {match['betrag']}){za_info}{fx_info}")
-                gesamt_matches += 1
-            else:
-                print(f"  KEIN BELEG: {datum_str} {orig_w} {trans['betrag']:>10.2f}  {trans['buchungstext'][:50]}")
-                ohne_beleg_liste.append({
-                    "kk": kk_typ,
-                    "datum": datum_str,
-                    "betrag": trans["betrag"],
-                    "waehrung": orig_w,
-                    "text": trans["buchungstext"][:60],
-                })
-                gesamt_ohne_beleg += 1
-
-        print()
-
-    # 4. Excel speichern
+    # 3. Excel laden (mit Lock um Race Conditions zu verhindern)
     try:
-        wb.save(config.EXCEL_PROTOKOLL)
-    except PermissionError:
-        print("\nFEHLER: Excel-Datei ist geöffnet! Bitte schliessen und erneut versuchen.")
-        print(f"  {config.EXCEL_PROTOKOLL}")
-        wb.close()
+        with config.excel_lock():
+            wb, belege = lade_excel_belege()
+            ws = wb.active
+
+            gesamt_matches = 0
+            gesamt_ohne_beleg = 0
+            gesamt_neu_za = 0
+            ohne_beleg_liste = []
+
+            for kk_typ, csv_pfad in sorted(kk_dateien.items()):
+                print(f"--- {kk_typ} ---")
+                transaktionen = lade_csv_transaktionen(csv_pfad)
+
+                # Nur Transaktionen ab letztem Jahr (passend zu unseren Belegen)
+                import datetime as _dt
+                min_jahr = _dt.date.today().year - 1
+                trans_aktuell = [t for t in transaktionen if t["datum"] and t["datum"].year >= min_jahr]
+                print(f"  {len(transaktionen)} Transaktionen total, {len(trans_aktuell)} ab {min_jahr}\n")
+
+                for trans in trans_aktuell:
+                    # Gebuehren/Zuschlaege ueberspringen
+                    if not trans["buchungstext"] or "ZUSCHLAG" in trans["buchungstext"].upper():
+                        continue
+
+                    match = match_transaktion_zu_beleg(trans, belege, kk_typ)
+
+                    datum_str = trans["datum"].strftime("%d.%m.%Y") if trans["datum"] else "?"
+                    orig_w = trans["orig_waehrung"] or trans["kk_waehrung"]
+
+                    if match:
+                        row = match["row"]
+                        bereits = match["abgeglichen"] == "Ja"
+
+                        if bereits:
+                            # Schon abgeglichen - still ueberspringen
+                            continue
+
+                        # Match gefunden -> Abgeglichen = Ja
+                        ws.cell(row=row, column=config.COL_ABGEGLICHEN).value = "Ja"
+
+                        # Zahlungsart ergaenzen wenn leer
+                        alte_za = ws.cell(row=row, column=config.COL_ZAHLUNGSART).value or ""
+                        if not alte_za:
+                            ws.cell(row=row, column=config.COL_ZAHLUNGSART).value = kk_typ
+                            gesamt_neu_za += 1
+                            za_info = f" [Zahlungsart -> {kk_typ}]"
+                        else:
+                            za_info = ""
+
+                        # PayPal ergaenzen
+                        if "PAYPAL" in trans["buchungstext"].upper():
+                            ws.cell(row=row, column=config.COL_PAYPAL).value = "Ja"
+
+                        # Fremdwaehrung: Belastungsbetrag + KK-Waehrung ins Excel schreiben
+                        fx_info = ""
+                        t_orig_w = trans["orig_waehrung"].upper() if trans["orig_waehrung"] else ""
+                        t_kk_w = trans["kk_waehrung"].upper() if trans["kk_waehrung"] else ""
+                        if t_orig_w and t_kk_w and t_orig_w != t_kk_w:
+                            # Fremdwaehrungstransaktion
+                            belastung_str = trans["belastung"]
+                            if belastung_str:
+                                try:
+                                    belastung = float(belastung_str.replace(",", "."))
+                                    ws.cell(row=row, column=config.COL_WAEHRUNG_BELASTET).value = t_kk_w
+                                    ws.cell(row=row, column=config.COL_BETRAG_BELASTET).value = belastung
+                                    fx_info = f" [FX: {t_kk_w} {belastung:.2f}]"
+                                except ValueError:
+                                    pass
+                            else:
+                                # Pending-Transaktion: Kurs/Belastung noch nicht bekannt
+                                ws.cell(row=row, column=config.COL_WAEHRUNG_BELASTET).value = t_kk_w
+                                fx_info = f" [FX: {t_kk_w} pending]"
+
+                        # Beleg als abgeglichen markieren (in-memory auch updaten)
+                        match["abgeglichen"] = "Ja"
+
+                        print(f"  NEU:  {datum_str} {orig_w} {trans['betrag']:>10.2f}  {trans['buchungstext'][:40]}")
+                        print(f"        -> {match['rechnungssteller']} ({match['waehrung']} {match['betrag']}){za_info}{fx_info}")
+                        gesamt_matches += 1
+                    else:
+                        print(f"  KEIN BELEG: {datum_str} {orig_w} {trans['betrag']:>10.2f}  {trans['buchungstext'][:50]}")
+                        ohne_beleg_liste.append({
+                            "kk": kk_typ,
+                            "datum": datum_str,
+                            "betrag": trans["betrag"],
+                            "waehrung": orig_w,
+                            "text": trans["buchungstext"][:60],
+                        })
+                        gesamt_ohne_beleg += 1
+
+                print()
+
+            # 4. Excel speichern
+            try:
+                wb.save(config.EXCEL_PROTOKOLL)
+            except PermissionError:
+                print("\nFEHLER: Excel-Datei ist geöffnet! Bitte schliessen und erneut versuchen.")
+                print(f"  {config.EXCEL_PROTOKOLL}")
+                wb.close()
+                return
+            wb.close()
+    except TimeoutError as e:
+        print(f"\nFEHLER: {e}")
         return
-    wb.close()
 
     # 5. CSVs archivieren
     datum_str = datetime.now().strftime("%Y-%m-%d")
