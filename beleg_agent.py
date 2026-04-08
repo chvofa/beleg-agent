@@ -961,6 +961,22 @@ def main():
         while True:
             schreibe_status("Laeuft")
 
+            # Watchdog Health-Check: Observer neu starten falls tot (z.B. nach Sleep/Hibernate)
+            if not observer.is_alive():
+                log.warning("Watchdog-Observer ist nicht mehr aktiv — starte neu...")
+                try:
+                    observer.stop()
+                    observer.join(timeout=5)
+                except Exception:
+                    pass
+                observer = Observer()
+                observer.schedule(handler, config.INBOX_PFAD, recursive=False)
+                observer.start()
+                log.info("Watchdog-Observer neu gestartet.")
+                toast("Beleg-Agent", "Watchdog wurde nach Sleep/Hibernate neu gestartet")
+                # Bestehende Dateien verarbeiten die waehrend Ausfall reinkamen
+                verarbeite_bestehende_dateien()
+
             # Erinnerungen alle 6 Stunden pruefen
             if time.time() - letzte_erinnerung > 6 * 3600:
                 letzte_erinnerung = time.time()
