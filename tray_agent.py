@@ -98,7 +98,13 @@ class BelegTray:
 
     def _start_web_server(self):
         """Startet Flask + AgentController in einem Background-Thread."""
-        from web_app import app, agent, WEB_PORT as port
+        try:
+            from web_app import app, agent, WEB_PORT as port
+        except ImportError as e:
+            print(f"Flask nicht installiert. Bitte ausfuehren:")
+            print(f"  pip install -r requirements.txt")
+            print(f"Fehler: {e}")
+            return
         try:
             agent.start()
         except Exception as e:
