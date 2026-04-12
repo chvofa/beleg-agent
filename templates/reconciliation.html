@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title_suffix %} – Abgleich{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Abgleich</h1>
+
+<div class="card">
+    <div class="card-title">CSV hochladen</div>
+    <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.75rem">
+        KK- oder Bank-Auszug als CSV in den Abgleich-Ordner laden.
+    </p>
+    <div style="display:flex; gap:0.5rem; align-items:center">
+        <input type="file" id="csv-input" accept=".csv">
+        <button class="btn btn-sm" onclick="uploadCSV()">CSV hochladen</button>
+    </div>
+</div>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem">
+    <div class="card">
+        <div class="card-title">Kreditkarten-Abgleich</div>
+        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.75rem">
+            Gleicht KK-Transaktionen mit erfassten Belegen ab.
+        </p>
+        <button class="btn btn-primary btn-sm" onclick="startReconciliation('kk')">KK-Abgleich starten</button>
+        <div class="terminal" id="terminal-kk" data-task-id="" style="margin-top:0.75rem">Bereit.</div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Bank-Abgleich</div>
+        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.75rem">
+            Gleicht Bank-Transaktionen mit erfassten Belegen ab.
+        </p>
+        <button class="btn btn-primary btn-sm" onclick="startReconciliation('bank')">Bank-Abgleich starten</button>
+        <div class="terminal" id="terminal-bank" data-task-id="" style="margin-top:0.75rem">Bereit.</div>
+    </div>
+</div>
+
+<div class="card" style="margin-top:1rem">
+    <div class="card-title">Daueraufträge</div>
+    <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.75rem">
+        Scannt den Daueraufträge-Ordner und erfasst wiederkehrende Rechnungen.
+    </p>
+    <button class="btn btn-sm" onclick="startReconciliation('dauerauftraege')">Daueraufträge scannen</button>
+    <div class="terminal" id="terminal-dauerauftraege" data-task-id="" style="margin-top:0.75rem">Bereit.</div>
+</div>
+{% endblock %}

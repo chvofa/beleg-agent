@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title_suffix %} – Dashboard{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem">
+    <h1 class="page-title" style="margin-bottom:0">Dashboard</h1>
+    <div class="btn-group">
+        {% if status.running %}
+        <span class="badge badge-green"><span class="dot"></span> Läuft</span>
+        <button class="btn btn-sm" onclick="agentAction('restart')">Neustarten</button>
+        <button class="btn btn-danger btn-sm" onclick="agentAction('stop')">Stoppen</button>
+        {% else %}
+        <span class="badge badge-red" id="status-text"><span class="dot"></span> Gestoppt</span>
+        <button class="btn btn-primary btn-sm" onclick="agentAction('start')">Starten</button>
+        {% endif %}
+    </div>
+</div>
+
+<div class="stats-grid">
+    <a href="/protocol" class="stat-card" title="Protokoll anzeigen">
+        <div class="stat-value">{{ stats.total_belege }}</div>
+        <div class="stat-label">Belege total</div>
+    </a>
+    <a href="/reconciliation" class="stat-card {{ 'warning' if stats.nicht_abgeglichen > 5 else '' }}" title="Abgleich starten">
+        <div class="stat-value">{{ stats.nicht_abgeglichen }}</div>
+        <div class="stat-label">Nicht abgeglichen</div>
+    </a>
+    <a href="/review" class="stat-card {{ 'danger' if stats.pruefen_count > 0 else '' }}" title="Belege prüfen">
+        <div class="stat-value">{{ stats.pruefen_count }}</div>
+        <div class="stat-label">Zur Prüfung</div>
+    </a>
+    <a href="/upload" class="stat-card" title="Belege hochladen">
+        <div class="stat-value">{{ stats.inbox_count }}</div>
+        <div class="stat-label">In Inbox</div>
+    </a>
+</div>
+
+<div class="stats-meta">
+    {% if stats.letzter_upload %}
+    <span>Letzter Upload: <strong>{{ stats.letzter_upload }}</strong></span>
+    {% endif %}
+    {% if stats.letzter_abgleich %}
+    <span>Letzter Abgleich: <strong>{{ stats.letzter_abgleich }}</strong></span>
+    {% endif %}
+</div>
+
+{% if stats.pruefen_count > 0 %}
+<div class="alert alert-warning">
+    {{ stats.pruefen_count }} Beleg(e) warten auf manuelle Prüfung.
+    <a href="/review">Jetzt prüfen</a>
+</div>
+{% endif %}
+
+{% if stats.duplikat_count > 0 %}
+<div class="alert alert-warning">
+    {{ stats.duplikat_count }} Duplikat(e) in der Inbox. Diese können gelöscht werden.
+    <a href="/review">Anzeigen</a>
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-title">Letzte Belege</div>
+    {% if stats.letzte_belege %}
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Datum</th>
+                    <th>Rechnungssteller</th>
+                    <th>Typ</th>
+                    <th style="text-align:right">Betrag</th>
+                    <th>Abgeglichen</th>
+                    <th>Confidence</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for b in stats.letzte_belege %}
+                <tr>
+                    <td>{{ b.Datum_Rechnung }}</td>
+                    <td>{{ b.Rechnungssteller }}</td>
+                    <td>{{ b.Typ }}</td>
+                    <td style="text-align:right; font-variant-numeric:tabular-nums">
+                        {{ b.Betrag_Formatiert }}
+                    </td>
+                    <td class="{{ 'cell-green' if b.Abgeglichen == 'Ja' else 'cell-red' }}">
+                        {{ b.Abgeglichen or 'Nein' }}
+                    </td>
+                    <td>
+                        {% set conf = b.Confidence_Score|float if b.Confidence_Score else 0 %}
+                        {% if conf %}
+                        <span class="{{ 'cell-green' if conf >= 0.85 else 'cell-yellow' if conf >= 0.6 else 'cell-red' }}">
+                            {{ (conf * 100)|int }}%
+                        </span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="color:var(--text-muted)">Noch keine Belege verarbeitet.</p>
+    {% endif %}
+</div>
+
+<div style="display:flex; gap:1rem; flex-wrap:wrap">
+    <a href="/upload" class="btn btn-primary">Belege hochladen</a>
+    <a href="/reconciliation" class="btn">Abgleich starten</a>
+    <a href="/protocol" class="btn">Protokoll anzeigen</a>
+</div>
+{% endblock %}

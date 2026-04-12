@@ -76,19 +76,20 @@ Belege/                          <-- dein gewaehlter Ordner
 
 ## Starten
 
-### Option A: System Tray (empfohlen)
+### Option A: Web-Interface (empfohlen)
 
 **Windows:** Doppelklick auf `start_beleg_agent.vbs`
-**macOS:** `./start_beleg_agent.sh` oder `.venv/bin/python3 tray_agent.py`
+**macOS:** `./start_beleg_agent.sh` oder `.venv/bin/python3 web_app.py`
 
-Das Tray-Icon zeigt den Status:
-- Gruen = Agent laeuft
-- Gelb = Agent reagiert nicht mehr
-- Rot = Agent gestoppt
+Das Web-Interface oeffnet sich automatisch unter `http://localhost:5001` und bietet:
+- **Dashboard** mit Agent-Status und Statistiken
+- **Upload** per Drag & Drop
+- **Protokoll-Tabelle** mit Suche, Sortierung und Export (Excel/CSV/ZIP)
+- **Abgleich** (KK/Bank) direkt aus dem Browser
+- **Pruefungs-Queue** fuer Belege mit niedrigem Confidence
+- **Live-Logs** und Einstellungen
 
-Rechtsklick auf das Tray-Icon oeffnet das Menue mit allen Funktionen.
-
-### Option B: Terminal
+### Option B: Terminal (nur Agent, ohne UI)
 
 ```bash
 python beleg_agent.py                # Windows
@@ -222,32 +223,19 @@ Der Agent prueft alle 6 Stunden automatisch:
 - Ob [PRUEFEN]- oder [DUPLIKAT]-Dateien in der Inbox liegen
 - Am Monatsanfang: Erinnerung an eBill/Monatsberichte
 
-## Tray-Menue
+## Web-Interface
 
-Rechtsklick auf das Tray-Icon:
+Das Web-Interface laeuft unter `http://localhost:5001` und ersetzt das bisherige Tray-Menue:
 
-```
-Status anzeigen          <-- zeigt aktuellen Agent-Status
----
-Abgleich >
-  KK-Abgleich starten
-  Bank-Abgleich starten
-  Dauerauftraege erfassen
-  ---
-  Abgleich-Ordner oeffnen
-  Dauerauftraege-Ordner oeffnen
----
-Inbox oeffnen
-Excel oeffnen
-Log oeffnen
----
-Agent >
-  Starten
-  Stoppen
-  Neustarten
-Hilfe                    <-- oeffnet README auf GitHub
-Beenden
-```
+| Seite | Funktion |
+|-------|----------|
+| Dashboard | Agent-Status, Statistiken, letzte Belege, Warnungen |
+| Upload | Drag & Drop fuer PDF/JPG/PNG → _Inbox |
+| Protokoll | Alle Belege als Tabelle, Suche, Sortierung, Excel/CSV/ZIP-Export |
+| Abgleich | KK/Bank-Abgleich starten, CSV hochladen, Live-Output |
+| Pruefung | [PRUEFEN]-Dateien korrigieren und freigeben |
+| Logs | Live-Log-Viewer |
+| Einstellungen | Pfade, Bank-Profil, Schwellenwerte aendern |
 
 ## Bank-Profile
 
@@ -343,7 +331,8 @@ Unterordner (`_Inbox`, `_Abgleich`, `_Dauerauftraege`) werden automatisch erstel
 ```
 beleg-agent/
   beleg_agent.py          # Hauptagent (Watchdog + Claude Vision + Ablage)
-  tray_agent.py           # System Tray Launcher
+  web_app.py              # Web-Interface (Flask, ersetzt Tray)
+  tray_agent.py           # System Tray Launcher (Legacy)
   platform_utils.py       # Plattform-Abstraktion (Windows/macOS)
   config.py               # Allgemeine Konfiguration
   config_local.py         # Lokale Pfade und Bank-Profil (nicht im Git)
@@ -352,8 +341,9 @@ beleg-agent/
   abgleich.py             # Kreditkarten-Abgleich
   abgleich_bank.py        # Bank-Abgleich
   dauerauftraege.py       # Dauerauftraege erfassen
-  status.py               # Status-Checker
   setup_beleg_agent.py    # Interaktives Setup
+  templates/              # Jinja2-Templates (Dashboard, Upload, etc.)
+  static/                 # CSS + JS
   start_beleg_agent.bat   # Startskript (Windows)
   start_beleg_agent.vbs   # Unsichtbarer Start (Windows)
   start_beleg_agent.sh    # Startskript (macOS)

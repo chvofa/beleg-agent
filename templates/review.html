@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title_suffix %} – Prüfung{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Belege prüfen</h1>
+
+<p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1rem">
+    Belege mit niedrigem Confidence-Score oder erkannte Duplikate.
+    Felder ausfüllen und freigeben, oder löschen.
+</p>
+
+<div id="review-list">
+    <div class="card"><p style="color:var(--text-muted)">Lade...</p></div>
+</div>
+{% endblock %}

@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title_suffix %} – Einstellungen{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Einstellungen</h1>
+
+<form id="settings-form" onsubmit="saveSettings(event)">
+    <div class="card">
+        <div class="card-title">Pfade</div>
+        <div class="form-group">
+            <label>Belege-Stammordner</label>
+            <input name="ablage_stammpfad" type="text" placeholder="/Users/.../Belege">
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Bank-Profil</div>
+        <div class="form-group">
+            <label>Bank</label>
+            <select name="bank_profil">
+                <option value="ubs">UBS</option>
+                <option value="raiffeisen">Raiffeisen</option>
+                <option value="postfinance">PostFinance</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Schwellenwerte</div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Automatische Ablage ab (Confidence)</label>
+                <input name="confidence_auto" type="number" step="0.01" min="0" max="1" placeholder="0.85">
+            </div>
+            <div class="form-group">
+                <label>Zur Prüfung ab (Confidence)</label>
+                <input name="confidence_rueckfrage" type="number" step="0.01" min="0" max="1" placeholder="0.60">
+            </div>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Einstellungen speichern</button>
+    <p style="color:var(--text-muted); font-size:0.8rem; margin-top:0.5rem">
+        Änderungen erfordern einen Neustart des Agents.
+    </p>
+</form>
+
+<div class="card" style="margin-top:1.5rem">
+    <div class="card-title">API Key</div>
+    <div id="api-key-info" style="margin-bottom:0.75rem">
+        <span class="badge badge-green" id="settings-key-badge" style="display:none">Vorhanden</span>
+        <span id="settings-key-masked" style="font-family:monospace; margin-left:0.5rem; font-size:0.85rem"></span>
+    </div>
+    <div class="form-group">
+        <label>Neuer Anthropic API Key</label>
+        <input id="new-api-key" type="password" placeholder="sk-ant-...">
+        <p style="font-size:0.8rem; color:var(--text-muted); margin-top:0.3rem">
+            Nur ausfüllen um den bestehenden Key zu ändern.
+        </p>
+    </div>
+    <button type="button" class="btn btn-primary" onclick="saveApiKey()">API Key speichern</button>
+</div>
+
+<script>
+(async function() {
+    try {
+        const res = await fetch('/api/setup/check');
+        const data = await res.json();
+        if (data.has_api_key) {
+            document.getElementById('settings-key-badge').style.display = 'inline-flex';
+            document.getElementById('settings-key-masked').textContent = data.api_key_masked;
+        }
+    } catch(e) {}
+})();
+
+async function saveApiKey() {
+    const input = document.getElementById('new-api-key');
+    const key = input.value.trim();
+    if (!key) { showToast('Bitte API Key eingeben'); return; }
+    const res = await fetch('/api/settings/apikey', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: key }),
+    });
+    const result = await res.json();
+    if (result.ok) {
+        showToast('API Key gespeichert');
+        input.value = '';
+        document.getElementById('settings-key-badge').style.display = 'inline-flex';
+        document.getElementById('settings-key-masked').textContent = result.masked;
+    } else {
+        showToast(result.error || 'Fehler');
+    }
+}
+</script>
+{% endblock %}

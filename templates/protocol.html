@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title_suffix %} – Protokoll{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Belege-Protokoll</h1>
+
+<div class="card">
+    <div class="search-bar">
+        <input type="text" id="protocol-search" placeholder="Volltextsuche..." oninput="filterProtocol()">
+        <span id="protocol-count" style="color:var(--text-muted); font-size:0.85rem"></span>
+        <div style="margin-left:auto" class="btn-group">
+            <input type="date" id="export-von" title="Von Datum">
+            <input type="date" id="export-bis" title="Bis Datum">
+            <button class="btn btn-sm" onclick="exportProtocol('xlsx')">Excel Export</button>
+            <button class="btn btn-sm" onclick="exportProtocol('csv')">CSV Export</button>
+        </div>
+    </div>
+
+    <div class="filter-bar" id="filter-bar">
+        <select id="filter-typ" onchange="filterProtocol()">
+            <option value="">Alle Typen</option>
+        </select>
+        <select id="filter-zahlungsart" onchange="filterProtocol()">
+            <option value="">Alle Zahlungsarten</option>
+        </select>
+        <select id="filter-abgeglichen" onchange="filterProtocol()">
+            <option value="">Alle</option>
+            <option value="Ja">Abgeglichen</option>
+            <option value="Nein">Nicht abgeglichen</option>
+        </select>
+        <select id="filter-waehrung" onchange="filterProtocol()">
+            <option value="">Alle Währungen</option>
+        </select>
+        <button class="btn btn-sm" onclick="resetFilters()" title="Filter zurücksetzen">Zurücksetzen</button>
+    </div>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width:2rem"></th>
+                    <th class="sortable" onclick="sortProtocol('Datum_Rechnung')" data-col="Datum_Rechnung">Datum <span class="sort-arrow"></span></th>
+                    <th class="sortable" onclick="sortProtocol('Rechnungssteller')" data-col="Rechnungssteller">Rechnungssteller <span class="sort-arrow"></span></th>
+                    <th class="sortable" onclick="sortProtocol('Typ')" data-col="Typ">Typ <span class="sort-arrow"></span></th>
+                    <th class="sortable" onclick="sortProtocol('Betrag')" data-col="Betrag" style="text-align:right">Betrag <span class="sort-arrow"></span></th>
+                    <th class="sortable" onclick="sortProtocol('Zahlungsart')" data-col="Zahlungsart">Zahlungsart <span class="sort-arrow"></span></th>
+                    <th class="sortable" onclick="sortProtocol('Abgeglichen')" data-col="Abgeglichen">Abgeglichen <span class="sort-arrow"></span></th>
+                    <th class="sortable" onclick="sortProtocol('Confidence_Score')" data-col="Confidence_Score">Conf. <span class="sort-arrow"></span></th>
+                    <th>Bemerkungen</th>
+                </tr>
+            </thead>
+            <tbody id="protocol-body"></tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
