@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Beleg-Agent – Setup</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        body { justify-content: center; align-items: center; min-height: 100vh; background: var(--bg); }
+        .setup-container { max-width: 500px; width: 100%; padding: 2rem; }
+        .setup-container h1 { text-align: center; margin-bottom: 0.5rem; }
+        .setup-container .subtitle { text-align: center; color: var(--text-muted); margin-bottom: 2rem; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <div class="setup-container">
+        <h1>Beleg-Agent Setup</h1>
+        <p class="subtitle">Ersteinrichtung in wenigen Schritten</p>
+
+        <form id="setup-form" onsubmit="runSetup(event)">
+            <div class="card" id="api-key-card">
+                <div class="card-title">1. API Key</div>
+                <div class="form-group">
+                    <label>Anthropic API Key</label>
+                    <div id="api-key-status" style="display:none; margin-bottom:0.5rem">
+                        <span class="badge badge-green">Vorhanden</span>
+                        <span id="api-key-masked" style="font-family:monospace; margin-left:0.5rem"></span>
+                    </div>
+                    <input name="api_key" type="password" placeholder="sk-ant-..." required>
+                    <p id="api-key-hint" style="font-size:0.8rem; color:var(--text-muted); margin-top:0.3rem">
+                        Erstelle einen unter <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a>
+                    </p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">2. Belege-Ordner</div>
+                <div class="form-group">
+                    <label>Pfad zum Stammordner</label>
+                    <input name="ablage_stammpfad" type="text" placeholder="/Users/.../Belege" required>
+                    <p style="font-size:0.8rem; color:var(--text-muted); margin-top:0.3rem">
+                        Unterordner (_Inbox, _Abgleich, _Dauerauftraege) werden automatisch erstellt.
+                    </p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">3. Bank</div>
+                <div class="form-group">
+                    <label>Bank-Profil</label>
+                    <select name="bank_profil">
+                        <option value="ubs">UBS</option>
+                        <option value="raiffeisen">Raiffeisen</option>
+                        <option value="postfinance">PostFinance</option>
+                    </select>
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; padding:0.75rem">
+                Setup abschließen
+            </button>
+        </form>
+
+        <div id="setup-result" style="display:none; margin-top:1rem"></div>
+    </div>
+
+    <script>
+    async function checkExistingConfig() {
+        try {
+            const res = await fetch('/api/setup/check');
+            const data = await res.json();
+            if (data.has_api_key) {
+                document.getElementById('api-key-status').style.display = 'block';
+                document.getElementById('api-key-masked').textContent = data.api_key_masked;
+                const input = document.querySelector('[name="api_key"]');
+                input.required = false;
+                input.placeholder = 'Leer lassen um bestehenden Key zu verwenden';
+                document.getElementById('api-key-hint').textContent = 'API Key bereits konfiguriert. Nur ausfüllen um zu ändern.';
+            }
+            if (data.ablage_stammpfad) {
+                document.querySelector('[name="ablage_stammpfad"]').value = data.ablage_stammpfad;
+            }
+            if (data.bank_profil) {
+                document.querySelector('[name="bank_profil"]').value = data.bank_profil;
+            }
+        } catch (e) {}
+    }
+
+    checkExistingConfig();
+
+    async function runSetup(e) {
+        e.preventDefault();
+        const form = document.getElementById('setup-form');
+        const data = {
+            api_key: form.querySelector('[name="api_key"]').value,
+            ablage_stammpfad: form.querySelector('[name="ablage_stammpfad"]').value,
+            bank_profil: form.querySelector('[name="bank_profil"]').value,
+        };
+
+        const btn = form.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        btn.textContent = 'Wird eingerichtet...';
+
+        try {
+            const res = await fetch('/api/setup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+            });
+            const result = await res.json();
+            const resultDiv = document.getElementById('setup-result');
+            resultDiv.style.display = 'block';
+            if (result.ok) {
+                resultDiv.innerHTML = '<div class="alert alert-success">Setup abgeschlossen! App wird neu geladen...</div>';
+                setTimeout(() => window.location.href = '/', 2000);
+            } else {
+                resultDiv.innerHTML = `<div class="alert alert-danger">${result.error || 'Fehler'}</div>`;
+                btn.disabled = false;
+                btn.textContent = 'Setup abschließen';
+            }
+        } catch (err) {
+            btn.disabled = false;
+            btn.textContent = 'Setup abschließen';
+        }
+    }
+    </script>
+</body>
+</html>

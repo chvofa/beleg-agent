@@ -280,7 +280,8 @@ def main():
         print(f"    python {os.path.join(agent_dir, 'tray_agent.py')}")
         print("  Oder Doppelklick auf start_beleg_agent.vbs")
     print()
-    print("  Belege in _Inbox legen – der Rest passiert automatisch.")
+    print("  Web-Interface oeffnet sich unter http://localhost:5001")
+    print("  Belege in _Inbox legen oder ueber das Web-Interface hochladen.")
     print()
 
     if ja_nein("Agent jetzt starten?"):

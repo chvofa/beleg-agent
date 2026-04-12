@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title_suffix %} – Upload{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Belege hochladen</h1>
+
+<div class="card">
+    <div class="upload-zone" id="upload-zone">
+        <h3>Dateien hierher ziehen</h3>
+        <p>oder klicken zum Auswählen (PDF, JPG, PNG)</p>
+        <input type="file" id="upload-input" multiple accept=".pdf,.jpg,.jpeg,.png" style="display:none">
+    </div>
+    <ul class="upload-list" id="upload-list"></ul>
+</div>
+
+<div class="card">
+    <div class="card-title">Inbox</div>
+    <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.5rem">
+        Hochgeladene Dateien werden automatisch vom Agent verarbeitet.
+    </p>
+    <div id="inbox-list"></div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', async () => {
+    const res = await fetch('/api/review');
+    const files = await res.json();
+    const list = document.getElementById('inbox-list');
+    if (files.length === 0) {
+        list.innerHTML = '<p style="color:var(--text-muted)">Inbox ist leer.</p>';
+        return;
+    }
+    list.innerHTML = '<table><thead><tr><th>Datei</th><th>Größe</th><th>Datum</th><th>Status</th></tr></thead><tbody>' +
+        files.map(f => `<tr>
+            <td>${f.name}</td>
+            <td>${f.size > 1024 ? (f.size/1024).toFixed(0) + ' KB' : f.size + ' B'}</td>
+            <td>${f.modified}</td>
+            <td>${f.is_pruefen ? '<span class="badge badge-yellow">Pruefen</span>' :
+                  f.is_duplikat ? '<span class="badge badge-red">Duplikat</span>' :
+                  '<span class="badge badge-green">Neu</span>'}</td>
+        </tr>`).join('') +
+        '</tbody></table>';
+});
+</script>
+{% endblock %}

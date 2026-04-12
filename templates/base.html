@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Beleg-Agent{% block title_suffix %}{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="sidebar-logo">
+            <span class="dot {% if status is defined %}{{ status.get('health', 'red') }}{% endif %}" id="status-dot"></span>
+            <span>Beleg-Agent</span>
+        </div>
+        <nav>
+            <a href="/dashboard" class="{% if request.path == '/dashboard' %}active{% endif %}">
+                <span>Dashboard</span>
+            </a>
+            <a href="/upload" class="{% if request.path == '/upload' %}active{% endif %}">
+                <span>Upload</span>
+            </a>
+            <a href="/protocol" class="{% if request.path == '/protocol' %}active{% endif %}">
+                <span>Protokoll</span>
+            </a>
+            <a href="/reconciliation" class="{% if request.path == '/reconciliation' %}active{% endif %}">
+                <span>Abgleich</span>
+            </a>
+            <a href="/review" class="{% if request.path == '/review' %}active{% endif %}">
+                <span>Prüfung</span>
+            </a>
+            <div class="sep"></div>
+            <a href="/logs" class="{% if request.path == '/logs' %}active{% endif %}">
+                <span>Logs</span>
+            </a>
+            <a href="/settings" class="{% if request.path == '/settings' %}active{% endif %}">
+                <span>Einstellungen</span>
+            </a>
+        </nav>
+    </aside>
+
+    <main class="main">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

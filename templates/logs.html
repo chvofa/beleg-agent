@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title_suffix %} – Logs{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
+    <h1 class="page-title" style="margin-bottom:0">Logs</h1>
+    <div class="btn-group">
+        <button class="btn btn-sm" onclick="loadLogs()">Aktualisieren</button>
+    </div>
+</div>
+
+<div class="log-viewer" id="log-viewer">Lade Logs...</div>
+{% endblock %}
