@@ -41,11 +41,13 @@ Laeuft auf **Windows** und **macOS**.
 git clone https://github.com/chvofa/beleg-agent.git
 cd beleg-agent
 python setup_beleg_agent.py          # Windows
-python3 setup_beleg_agent.py         # macOS
+python3 setup_beleg_agent.py         # macOS (erstellt automatisch .venv)
 ```
 
+Auf macOS erstellt das Setup automatisch eine virtuelle Umgebung (`.venv`) und installiert alle Pakete darin, um Konflikte mit dem System-Python zu vermeiden.
+
 Das Setup fragt interaktiv alles Noetige ab:
-1. Installiert Abhaengigkeiten (plattformspezifisch)
+1. Installiert Abhaengigkeiten (Windows: global, macOS: in `.venv`)
 2. Fragt den Anthropic API Key ab und speichert ihn (Windows: Umgebungsvariable, macOS: ~/.zshrc)
 3. Fragt den Belege-Ordner ab und erstellt die Ordnerstruktur
 4. Fragt die Bank ab (UBS, Raiffeisen oder PostFinance) und optional Kreditkartennummern
@@ -77,7 +79,7 @@ Belege/                          <-- dein gewaehlter Ordner
 ### Option A: System Tray (empfohlen)
 
 **Windows:** Doppelklick auf `start_beleg_agent.vbs`
-**macOS:** `./start_beleg_agent.sh` oder `python3 tray_agent.py`
+**macOS:** `./start_beleg_agent.sh` oder `.venv/bin/python3 tray_agent.py`
 
 Das Tray-Icon zeigt den Status:
 - Gruen = Agent laeuft
@@ -90,7 +92,7 @@ Rechtsklick auf das Tray-Icon oeffnet das Menue mit allen Funktionen.
 
 ```bash
 python beleg_agent.py                # Windows
-python3 beleg_agent.py               # macOS
+.venv/bin/python3 beleg_agent.py     # macOS
 ```
 
 ### Autostart
@@ -292,8 +294,15 @@ Alle Einstellungen in `config.py`:
 
 ### 1. Abhaengigkeiten installieren
 
+**Windows:**
 ```bash
 pip install -r requirements.txt
+```
+
+**macOS:**
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 ```
 
 ### 2. API-Key setzen

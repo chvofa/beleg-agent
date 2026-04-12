@@ -16,6 +16,15 @@ import pystray
 
 import platform_utils
 
+# ── macOS: Python-Icon aus Dock verstecken (reine Menubar-App) ────────────
+if sys.platform == "darwin":
+    try:
+        from AppKit import NSBundle
+        info = NSBundle.mainBundle().infoDictionary()
+        info["LSUIElement"] = "1"
+    except Exception:
+        pass
+
 # ── DPI Awareness (gegen Pixelation auf HiDPI-Displays) ───────────────────
 if sys.platform == "win32":
     try:

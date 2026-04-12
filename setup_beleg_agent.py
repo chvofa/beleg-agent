@@ -43,20 +43,46 @@ def main():
 
     agent_dir = os.path.dirname(os.path.abspath(__file__))
 
+    # venv-Python fuer macOS, System-Python fuer Windows
+    venv_dir = os.path.join(agent_dir, ".venv")
+    if sys.platform == "darwin":
+        venv_python = os.path.join(venv_dir, "bin", "python3")
+    else:
+        venv_python = sys.executable
+
     # ── 1. Abhaengigkeiten ────────────────────────────────────────────────
     print("[1/5] Abhaengigkeiten pruefen...\n")
 
     req_file = os.path.join(agent_dir, "requirements.txt")
     try:
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "-r", req_file],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        print("  Alle Abhaengigkeiten installiert.\n")
+        if sys.platform == "darwin":
+            # macOS: Homebrew-Python verbietet System-Installationen (PEP 668)
+            # → venv erstellen und Pakete darin installieren
+            if not os.path.exists(venv_dir):
+                print("  Erstelle virtuelle Umgebung (.venv)...")
+                subprocess.check_call(
+                    [sys.executable, "-m", "venv", venv_dir],
+                )
+            subprocess.check_call(
+                [venv_python, "-m", "pip", "install", "-r", req_file],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            print("  Alle Abhaengigkeiten in .venv installiert.\n")
+        else:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "-r", req_file],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            print("  Alle Abhaengigkeiten installiert.\n")
     except subprocess.CalledProcessError:
         print("  WARNUNG: Einige Pakete konnten nicht installiert werden.")
-        print("  Bitte manuell ausfuehren: pip install -r requirements.txt\n")
+        if sys.platform == "darwin":
+            print("  Bitte manuell ausfuehren:")
+            print("    python3 -m venv .venv && .venv/bin/pip install -r requirements.txt\n")
+        else:
+            print("  Bitte manuell ausfuehren: pip install -r requirements.txt\n")
 
     # ── 2. API-Key ────────────────────────────────────────────────────────
     print("[2/5] Anthropic API Key\n")
@@ -205,7 +231,7 @@ def main():
                 plist_dir = os.path.expanduser("~/Library/LaunchAgents")
                 os.makedirs(plist_dir, exist_ok=True)
                 plist_pfad = os.path.join(plist_dir, "com.meocon.beleg-agent.plist")
-                python_exe = sys.executable
+                python_exe = venv_python
                 script_pfad = os.path.join(agent_dir, "tray_agent.py")
                 plist_inhalt = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -247,11 +273,12 @@ def main():
     print("=" * 58)
     print()
     print("  Starten mit:")
-    print(f"    python {os.path.join(agent_dir, 'tray_agent.py')}")
-    if sys.platform == "win32":
-        print("  Oder Doppelklick auf start_beleg_agent.vbs")
-    elif sys.platform == "darwin":
+    if sys.platform == "darwin":
+        print(f"    .venv/bin/python3 tray_agent.py")
         print("  Oder: ./start_beleg_agent.sh")
+    else:
+        print(f"    python {os.path.join(agent_dir, 'tray_agent.py')}")
+        print("  Oder Doppelklick auf start_beleg_agent.vbs")
     print()
     print("  Belege in _Inbox legen – der Rest passiert automatisch.")
     print()
@@ -259,7 +286,7 @@ def main():
     if ja_nein("Agent jetzt starten?"):
         print("  Starte Beleg-Agent...\n")
         subprocess.Popen(
-            [sys.executable, os.path.join(agent_dir, "tray_agent.py")],
+            [venv_python, os.path.join(agent_dir, "tray_agent.py")],
             cwd=agent_dir,
         )
 

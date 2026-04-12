@@ -90,8 +90,24 @@ def get_api_key_from_env():
                 return key
         except Exception:
             pass
-    # Fallback: Prozess-Umgebung (funktioniert auf Mac + als Windows-Fallback)
-    return os.environ.get("ANTHROPIC_API_KEY", "")
+    # Prozess-Umgebung
+    key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if key:
+        return key
+    # macOS-Fallback: LaunchAgents lesen ~/.zshrc nicht, Key direkt parsen
+    if IS_MAC:
+        try:
+            import re
+            zshrc = os.path.expanduser("~/.zshrc")
+            if os.path.exists(zshrc):
+                with open(zshrc, "r") as f:
+                    for line in f:
+                        m = re.match(r'^export\s+ANTHROPIC_API_KEY=["\']?([^"\'\s]+)', line)
+                        if m:
+                            return m.group(1)
+        except Exception:
+            pass
+    return ""
 
 
 def set_api_key_in_env(api_key):
