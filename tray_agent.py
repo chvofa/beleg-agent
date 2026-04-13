@@ -57,15 +57,30 @@ def erstelle_icon(farbe="green", size=256):
         "yellow": (227, 149, 31),
         "gray": (110, 118, 129),
     }
-    fill = farben.get(farbe, farben["gray"])
+
+    # macOS: "Laeuft"-Zustand in Weiss statt Gruen — fuegt sich ruhiger in
+    # die Menuleiste ein. Rot/Gelb bleiben auffaellig fuer Fehler/Warnung.
+    macos_weiss = sys.platform == "darwin" and farbe == "green"
+    if macos_weiss:
+        fill = (255, 255, 255)
+        text_color = (40, 40, 40)
+    else:
+        fill = farben.get(farbe, farben["gray"])
+        text_color = (255, 255, 255)
 
     margin = size // 16
-    draw.ellipse(
-        [margin, margin, size - margin, size - margin],
-        fill=fill,
-        outline=(255, 255, 255, 200),
-        width=max(2, size // 32),
-    )
+    if macos_weiss:
+        draw.ellipse(
+            [margin, margin, size - margin, size - margin],
+            fill=fill,
+        )
+    else:
+        draw.ellipse(
+            [margin, margin, size - margin, size - margin],
+            fill=fill,
+            outline=(255, 255, 255, 200),
+            width=max(2, size // 32),
+        )
 
     try:
         font_size = int(size * 0.5)
@@ -82,7 +97,7 @@ def erstelle_icon(farbe="green", size=256):
     th = bbox[3] - bbox[1]
     x = (size - tw) // 2
     y = (size - th) // 2 - bbox[1]
-    draw.text((x, y), "B", fill=(255, 255, 255), font=font)
+    draw.text((x, y), "B", fill=text_color, font=font)
 
     return img
 
