@@ -15,6 +15,7 @@ import openpyxl
 
 import config
 import bank_profile
+import offene_posten
 
 # Windows UTF-8
 if sys.platform == "win32":
@@ -270,19 +271,21 @@ def main():
         with config.excel_lock():
             wb, belege = lade_excel_belege()
             ws = wb.active
+            ws_offen = offene_posten.ensure_sheet(wb)
 
             gesamt_matches = 0
             gesamt_ohne_beleg = 0
             gesamt_neu_za = 0
+            gesamt_neu_offen = 0
+            gesamt_bereits_offen = 0
+            gesamt_bereits_ignoriert = 0
             ohne_beleg_liste = []
 
             for kk_typ, csv_pfad in sorted(kk_dateien.items()):
                 print(f"--- {kk_typ} ---")
                 transaktionen = lade_csv_transaktionen(csv_pfad)
 
-                # Nur Transaktionen ab letztem Jahr (passend zu unseren Belegen)
-                import datetime as _dt
-                min_jahr = _dt.date.today().year - 1
+                min_jahr = config.MIN_JAHR_ABGLEICH
                 trans_aktuell = [t for t in transaktionen if t["datum"] and t["datum"].year >= min_jahr]
                 print(f"  {len(transaktionen)} Transaktionen total, {len(trans_aktuell)} ab {min_jahr}\n")
 
@@ -347,15 +350,35 @@ def main():
                         print(f"        -> {match['rechnungssteller']} ({match['waehrung']} {match['betrag']}){za_info}{fx_info}")
                         gesamt_matches += 1
                     else:
-                        print(f"  KEIN BELEG: {datum_str} {orig_w} {trans['betrag']:>10.2f}  {trans['buchungstext'][:50]}")
+                        upsert_status = offene_posten.upsert(
+                            ws_offen,
+                            quelle=kk_typ,
+                            datum=trans["datum"],
+                            betrag=trans["betrag"],
+                            waehrung=orig_w,
+                            text=trans["buchungstext"],
+                        )
+                        marker = {
+                            "neu": "NEU OFFEN",
+                            "bereits_offen": "BEREITS OFFEN",
+                            "bereits_ignoriert": "IGNORIERT",
+                        }.get(upsert_status, "KEIN BELEG")
+                        print(f"  {marker}: {datum_str} {orig_w} {trans['betrag']:>10.2f}  {trans['buchungstext'][:50]}")
                         ohne_beleg_liste.append({
                             "kk": kk_typ,
                             "datum": datum_str,
                             "betrag": trans["betrag"],
                             "waehrung": orig_w,
                             "text": trans["buchungstext"][:60],
+                            "upsert": upsert_status,
                         })
                         gesamt_ohne_beleg += 1
+                        if upsert_status == "neu":
+                            gesamt_neu_offen += 1
+                        elif upsert_status == "bereits_offen":
+                            gesamt_bereits_offen += 1
+                        elif upsert_status == "bereits_ignoriert":
+                            gesamt_bereits_ignoriert += 1
 
                 print()
 
@@ -387,6 +410,9 @@ def main():
     print(f"  Abgeglichen:              {gesamt_matches}")
     print(f"  Zahlungsart ergaenzt:      {gesamt_neu_za}")
     print(f"  KK-Transaktionen ohne Beleg: {gesamt_ohne_beleg}")
+    print(f"    davon neu offen:        {gesamt_neu_offen}")
+    print(f"    davon schon offen:      {gesamt_bereits_offen}")
+    print(f"    davon ignoriert:        {gesamt_bereits_ignoriert}")
 
     if ohne_beleg_liste:
         print(f"\n  Transaktionen OHNE passenden Beleg:")

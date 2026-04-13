@@ -427,6 +427,7 @@ def _format_betrag(row: dict) -> str:
 
 def _dashboard_stats() -> dict:
     """Berechnet Statistiken fürs Dashboard."""
+    import offene_posten as op_mod
     protokoll = _lade_protokoll()
     inbox = _inbox_dateien()
     total = len(protokoll)
@@ -435,6 +436,7 @@ def _dashboard_stats() -> dict:
     )
     pruefen = sum(1 for f in inbox if f["is_pruefen"])
     duplikate = sum(1 for f in inbox if f["is_duplikat"])
+    offene_posten_count = op_mod.count_offen()
 
     # Formatierte Beträge für letzte Belege
     letzte = protokoll[-10:][::-1] if protokoll else []
@@ -459,6 +461,7 @@ def _dashboard_stats() -> dict:
         "pruefen_count": pruefen,
         "duplikat_count": duplikate,
         "inbox_count": len(inbox),
+        "offene_posten_count": offene_posten_count,
         "letzte_belege": letzte,
         "letzter_upload": letzter_upload,
         "letzter_abgleich": letzter_abgleich,
@@ -503,6 +506,11 @@ def reconciliation_page():
 @app.route("/review")
 def review_page():
     return render_template("review.html")
+
+
+@app.route("/offene-posten")
+def offene_posten_page():
+    return render_template("offene_posten.html")
 
 
 @app.route("/logs")
@@ -811,6 +819,40 @@ def api_review_reject(filename):
     if os.path.exists(dateipfad):
         os.remove(dateipfad)
     return jsonify({"ok": True})
+
+
+# ── Offene Posten ─────────────────────────────────────────────────────────
+
+@app.route("/api/offene-posten")
+def api_offene_posten_list():
+    import offene_posten
+    posten = offene_posten.list_offen_standalone()
+    return jsonify({
+        "posten": posten,
+        "gruende": offene_posten.GRUENDE,
+    })
+
+
+@app.route("/api/offene-posten/<int:row_idx>/ignorieren", methods=["POST"])
+def api_offene_posten_ignorieren(row_idx):
+    import offene_posten
+    data = request.get_json() or {}
+    grund = str(data.get("grund", "")).strip()
+    notiz = str(data.get("notiz", "")).strip()
+    if grund not in offene_posten.GRUENDE:
+        return jsonify({"error": "Ungueltiger Grund"}), 400
+    if grund == "Sonstige" and not notiz:
+        return jsonify({"error": "Notiz erforderlich bei 'Sonstige'"}), 400
+    ok = offene_posten.set_ignored_standalone(row_idx, grund, notiz)
+    if not ok:
+        return jsonify({"error": "Posten nicht gefunden oder nicht offen"}), 404
+    return jsonify({"ok": True})
+
+
+@app.route("/api/offene-posten/count")
+def api_offene_posten_count():
+    import offene_posten
+    return jsonify({"count": offene_posten.count_offen()})
 
 
 # ── Logs ──────────────────────────────────────────────────────────────────

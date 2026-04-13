@@ -28,6 +28,11 @@ try:
 except ImportError:
     BANK_PROFIL = "ubs"  # Standard-Bankprofil
 
+try:
+    from config_local import MIN_JAHR_ABGLEICH
+except ImportError:
+    MIN_JAHR_ABGLEICH = 2026  # Abgleich ignoriert Transaktionen vor diesem Jahr
+
 # ── Pfade (abgeleitet aus ABLAGE_STAMMPFAD) ───────────────────────────────
 ABLAGE_STAMMPFAD = os.path.expanduser(ABLAGE_STAMMPFAD)
 INBOX_PFAD = os.path.join(ABLAGE_STAMMPFAD, "_Inbox")

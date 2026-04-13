@@ -16,6 +16,7 @@ import openpyxl
 
 import config
 import bank_profile
+import offene_posten
 from abgleich import _get_col, _lese_csv
 
 if sys.platform == "win32":
@@ -345,8 +346,13 @@ def main():
                     "abgeglichen": str(ws.cell(row=row_idx, column=config.COL_ABGEGLICHEN).value or "").strip(),
                 })
 
+            ws_offen = offene_posten.ensure_sheet(wb)
+
             gesamt_matches = 0
             gesamt_neu_za = 0
+            gesamt_neu_offen = 0
+            gesamt_bereits_offen = 0
+            gesamt_bereits_ignoriert = 0
             ohne_beleg_liste = []
 
             for datei in sorted(csv_dateien):
@@ -357,9 +363,7 @@ def main():
                 print(f"--- {bank_typ} ({datei}) ---")
                 waehrung_csv, transaktionen = lade_bank_transaktionen(pfad)
 
-                # Nur Transaktionen ab letztem Jahr
-                import datetime as _dt
-                min_jahr = _dt.date.today().year - 1
+                min_jahr = config.MIN_JAHR_ABGLEICH
                 trans_aktuell = [t for t in transaktionen if t["datum"] and t["datum"].year >= min_jahr]
                 print(f"  {len(transaktionen)} Transaktionen total, {len(trans_aktuell)} ab {min_jahr}\n")
 
@@ -392,13 +396,38 @@ def main():
                         print(f"        -> {match['rechnungssteller']} ({match['waehrung']} {match['betrag']}){za_info}")
                         gesamt_matches += 1
                     else:
+                        trans_waehrung = trans.get("waehrung") or waehrung
+                        volltext = trans["beschreibung"]
+                        if trans["details"]:
+                            volltext = f"{volltext} | {trans['details']}"
+                        upsert_status = offene_posten.upsert(
+                            ws_offen,
+                            quelle=bank_typ,
+                            datum=trans["datum"],
+                            betrag=trans["betrag"],
+                            waehrung=trans_waehrung,
+                            text=volltext,
+                        )
+                        marker = {
+                            "neu": "NEU OFFEN",
+                            "bereits_offen": "BEREITS OFFEN",
+                            "bereits_ignoriert": "IGNORIERT",
+                        }.get(upsert_status, "KEIN BELEG")
+                        print(f"  {marker}: {datum_str} {gs}{trans['betrag']:>10.2f} {trans_waehrung}  {beschr_kurz}")
                         ohne_beleg_liste.append({
                             "bank": bank_typ,
                             "datum": datum_str,
                             "betrag": trans["betrag"],
                             "gs": gs,
                             "text": beschr_kurz,
+                            "upsert": upsert_status,
                         })
+                        if upsert_status == "neu":
+                            gesamt_neu_offen += 1
+                        elif upsert_status == "bereits_offen":
+                            gesamt_bereits_offen += 1
+                        elif upsert_status == "bereits_ignoriert":
+                            gesamt_bereits_ignoriert += 1
 
                 print()
 
@@ -431,7 +460,10 @@ def main():
     print(f"{'='*60}")
     print(f"  Abgeglichen:           {gesamt_matches}")
     print(f"  Zahlungsart ergaenzt:   {gesamt_neu_za}")
-    print(f"  Ohne Beleg:            {len(ohne_beleg_liste)} (nicht alle brauchen einen)")
+    print(f"  Ohne Beleg:            {len(ohne_beleg_liste)}")
+    print(f"    davon neu offen:     {gesamt_neu_offen}")
+    print(f"    davon schon offen:   {gesamt_bereits_offen}")
+    print(f"    davon ignoriert:     {gesamt_bereits_ignoriert}")
 
 
 if __name__ == "__main__":

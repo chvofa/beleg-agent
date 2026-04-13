@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block title_suffix %} – Offene Posten{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Offene Posten</h1>
+
+<p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem">
+    Transaktionen aus Bank-/KK-Abgleich, fuer die noch kein Beleg vorliegt.
+    Pro Zeile: entweder <strong>Beleg hochladen</strong> oder <strong>Kein Beleg noetig</strong> (mit Grund).
+</p>
+
+<div class="card">
+    <div id="op-status" style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.75rem">
+        Lade …
+    </div>
+    <div class="table-wrap">
+        <table id="op-table">
+            <thead>
+                <tr>
+                    <th>Quelle</th>
+                    <th>Datum</th>
+                    <th style="text-align:right">Betrag</th>
+                    <th>Waehrung</th>
+                    <th>Buchungstext</th>
+                    <th>Erfasst</th>
+                    <th style="width:260px">Aktion</th>
+                </tr>
+            </thead>
+            <tbody id="op-tbody"></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Ignorieren-Dialog -->
+<div id="op-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center">
+    <div class="card" style="max-width:480px; width:90%">
+        <div class="card-title">Kein Beleg noetig</div>
+        <p id="op-modal-info" style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.75rem"></p>
+        <label style="display:block; margin-bottom:0.5rem">
+            <strong>Grund</strong>
+            <select id="op-modal-grund" style="width:100%; padding:0.4rem; margin-top:0.25rem">
+                <option value="">-- bitte waehlen --</option>
+            </select>
+        </label>
+        <label id="op-modal-notiz-wrap" style="display:none; margin-bottom:0.5rem">
+            <strong>Notiz (Pflicht)</strong>
+            <input type="text" id="op-modal-notiz" maxlength="200"
+                   style="width:100%; padding:0.4rem; margin-top:0.25rem"
+                   placeholder="Kurze Erklaerung, z.B. 'privat zurueckgebucht'">
+        </label>
+        <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:1rem">
+            <button class="btn btn-sm" onclick="opModalClose()">Abbrechen</button>
+            <button class="btn btn-primary btn-sm" onclick="opModalConfirm()">Bestaetigen</button>
+        </div>
+    </div>
+</div>
+
+<input type="file" id="op-file-input" accept=".pdf,.jpg,.jpeg,.png" style="display:none">
+{% endblock %}
+
+{% block scripts %}
+<script>
+let opGruende = [];
+let opCurrentRow = null;
+let opCurrentUploadRow = null;
+
+async function opLoad() {
+    const res = await fetch('/api/offene-posten');
+    const data = await res.json();
+    opGruende = data.gruende || [];
+    const tbody = document.getElementById('op-tbody');
+    tbody.innerHTML = '';
+    const status = document.getElementById('op-status');
+
+    if (!data.posten || data.posten.length === 0) {
+        status.textContent = 'Keine offenen Posten. Alles sauber.';
+        return;
+    }
+    status.textContent = `${data.posten.length} offene Posten`;
+
+    // Dropdown-Optionen setzen
+    const sel = document.getElementById('op-modal-grund');
+    sel.innerHTML = '<option value="">-- bitte waehlen --</option>';
+    opGruende.forEach(g => {
+        const opt = document.createElement('option');
+        opt.value = g;
+        opt.textContent = g;
+        sel.appendChild(opt);
+    });
+
+    data.posten.forEach(p => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${escapeHtml(p.quelle)}</td>
+            <td>${escapeHtml(p.datum)}</td>
+            <td style="text-align:right; font-variant-numeric:tabular-nums">${formatBetrag(p.betrag)}</td>
+            <td>${escapeHtml(p.waehrung)}</td>
+            <td style="max-width:400px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title="${escapeHtml(p.text)}">${escapeHtml(p.text)}</td>
+            <td style="color:var(--text-muted); font-size:0.8rem">${escapeHtml(p.erfasst_am)}</td>
+            <td>
+                <button class="btn btn-sm btn-primary" onclick="opUpload(${p.row})">Beleg hochladen</button>
+                <button class="btn btn-sm" onclick="opIgnore(${p.row}, '${escapeAttr(p.quelle)}', '${escapeAttr(p.datum)}', ${p.betrag}, '${escapeAttr(p.waehrung)}')">Kein Beleg</button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, c => (
+        {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+    ));
+}
+function escapeAttr(s) {
+    return String(s || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+function formatBetrag(v) {
+    if (typeof v !== 'number') return v;
+    return v.toFixed(2);
+}
+
+function opIgnore(row, quelle, datum, betrag, waehrung) {
+    opCurrentRow = row;
+    document.getElementById('op-modal-info').textContent =
+        `${quelle} · ${datum} · ${waehrung} ${formatBetrag(betrag)}`;
+    document.getElementById('op-modal-grund').value = '';
+    document.getElementById('op-modal-notiz').value = '';
+    document.getElementById('op-modal-notiz-wrap').style.display = 'none';
+    document.getElementById('op-modal').style.display = 'flex';
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    opLoad();
+    document.getElementById('op-modal-grund').addEventListener('change', (e) => {
+        const wrap = document.getElementById('op-modal-notiz-wrap');
+        wrap.style.display = (e.target.value === 'Sonstige') ? 'block' : 'none';
+    });
+    document.getElementById('op-file-input').addEventListener('change', opFileSelected);
+});
+
+function opModalClose() {
+    document.getElementById('op-modal').style.display = 'none';
+    opCurrentRow = null;
+}
+
+async function opModalConfirm() {
+    const grund = document.getElementById('op-modal-grund').value;
+    const notiz = document.getElementById('op-modal-notiz').value.trim();
+    if (!grund) {
+        alert('Bitte einen Grund waehlen.');
+        return;
+    }
+    if (grund === 'Sonstige' && !notiz) {
+        alert('Bei "Sonstige" ist eine Notiz erforderlich.');
+        return;
+    }
+    const res = await fetch(`/api/offene-posten/${opCurrentRow}/ignorieren`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({grund, notiz}),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert('Fehler: ' + (err.error || res.statusText));
+        return;
+    }
+    opModalClose();
+    opLoad();
+}
+
+function opUpload(row) {
+    opCurrentUploadRow = row;
+    document.getElementById('op-file-input').click();
+}
+
+async function opFileSelected(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/api/upload', {method: 'POST', body: fd});
+    e.target.value = '';
+    if (!res.ok) {
+        alert('Upload fehlgeschlagen');
+        return;
+    }
+    // Hinweis: Datei landet in Inbox und wird vom Agent verarbeitet.
+    // Bei Match wird der offene Posten automatisch aufgeloest.
+    alert('Beleg hochgeladen. Der Agent verarbeitet ihn automatisch — die Liste aktualisiert sich in wenigen Sekunden.');
+    setTimeout(opLoad, 3000);
+}
+</script>
+{% endblock %}

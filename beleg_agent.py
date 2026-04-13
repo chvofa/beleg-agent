@@ -684,6 +684,19 @@ def lege_datei_ab(dateipfad: str, daten: dict) -> bool:
     # Protokoll schreiben (Fehler hier soll Ablage nicht rückgängig machen)
     schreibe_protokoll(daten, original_name, zielpfad)
 
+    # Offene Posten auflösen (falls dieser Beleg zu einer offenen Transaktion passt)
+    try:
+        import offene_posten
+        anzahl = offene_posten.resolve_standalone(
+            datum=daten.get("rechnungsdatum", ""),
+            betrag=float(daten.get("betrag", 0) or 0),
+            waehrung=daten.get("waehrung", ""),
+        )
+        if anzahl > 0:
+            log.info(f"Offene Posten aufgeloest: {anzahl}")
+    except Exception as e:
+        log.warning(f"Konnte offene Posten nicht pruefen: {e}")
+
     # Toast-Benachrichtigung
     typ = daten.get("typ", "Rechnung")
     rs = daten.get("rechnungssteller", "?")

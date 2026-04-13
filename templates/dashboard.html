@@ -25,6 +25,10 @@
         <div class="stat-value">{{ stats.nicht_abgeglichen }}</div>
         <div class="stat-label">Nicht abgeglichen</div>
     </a>
+    <a href="/offene-posten" class="stat-card {{ 'danger' if stats.offene_posten_count > 0 else '' }}" title="Offene Posten bearbeiten">
+        <div class="stat-value">{{ stats.offene_posten_count }}</div>
+        <div class="stat-label">Offene Posten</div>
+    </a>
     <a href="/review" class="stat-card {{ 'danger' if stats.pruefen_count > 0 else '' }}" title="Belege prüfen">
         <div class="stat-value">{{ stats.pruefen_count }}</div>
         <div class="stat-label">Zur Prüfung</div>

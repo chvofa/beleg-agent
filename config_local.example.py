@@ -19,3 +19,8 @@ ABLAGE_STAMMPFAD = r"C:\Users\DEIN_USER\Pfad\zu\Belege"
 # Verfügbar: "ubs", "raiffeisen", "postfinance"
 # Siehe bank_profile.py für Details und um eigene Profile hinzuzufügen.
 BANK_PROFIL = "ubs"
+
+# Abgleich-Scripte ignorieren Transaktionen vor diesem Jahr.
+# Default: 2026 (siehe config.py). Bei Jahreswechsel hochsetzen oder bei
+# Bedarf (z.B. Nachbearbeitung) temporaer runtersetzen.
+# MIN_JAHR_ABGLEICH = 2026
