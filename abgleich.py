@@ -161,12 +161,16 @@ def lade_excel_belege() -> tuple[openpyxl.Workbook, list[dict]]:
     return wb, belege
 
 
-def match_transaktion_zu_beleg(trans: dict, belege: list[dict], kk_typ: str) -> dict | None:
+def match_transaktion_zu_beleg(trans: dict, belege: list[dict], kk_typ: str,
+                                 include_matched: bool = False) -> dict | None:
     """Versucht eine KK-Transaktion einem Beleg zuzuordnen (fuzzy matching).
 
     Waehrungslogik:
     - Beleg-Waehrung muss zur Originalwaehrung der KK-Transaktion passen
     - Betrag wird gegen Originalbetrag verglichen (nicht den umgerechneten Belastungsbetrag)
+
+    include_matched=True bezieht auch bereits als "Ja" markierte Belege ein.
+    Wird im zweiten Pass genutzt, um Rolling-Export-Wiederholungen zu erkennen.
     """
     buch = trans["buchungstext"].upper()
     t_betrag = trans["betrag"]          # Originalbetrag (z.B. USD 21.62)
@@ -176,8 +180,8 @@ def match_transaktion_zu_beleg(trans: dict, belege: list[dict], kk_typ: str) -> 
     beste_matches = []
 
     for beleg in belege:
-        # Bereits abgeglichene Belege ueberspringen
-        if beleg["abgeglichen"] == "Ja":
+        # Bereits abgeglichene Belege ueberspringen (ausser im Recall-Pass)
+        if not include_matched and beleg["abgeglichen"] == "Ja":
             continue
 
         b_betrag = beleg["betrag"]
@@ -273,7 +277,28 @@ def main():
             ws = wb.active
             ws_offen = offene_posten.ensure_sheet(wb)
 
+            # Aufraeumen: existierende offene Posten entfernen, fuer die es inzwischen
+            # einen abgeglichenen Beleg gibt (Rolling-Export-Duplikate aus frueheren Laeufen).
+            cleanup_entfernt = 0
+            for beleg in belege:
+                if beleg["abgeglichen"] != "Ja":
+                    continue
+                if not beleg["datum"] or not beleg["betrag"]:
+                    continue
+                n = offene_posten.resolve(
+                    ws_offen, beleg["datum"], beleg["betrag"], beleg["waehrung"]
+                )
+                if n > 0:
+                    cleanup_entfernt += n
+                    print(f"  Aufgeraeumt: {beleg['rechnungssteller'][:40]} "
+                          f"{beleg['waehrung']} {beleg['betrag']:.2f} "
+                          f"({n} offene(r) Posten entfernt)")
+            if cleanup_entfernt > 0:
+                print(f"\n  -> {cleanup_entfernt} offene Posten aufgeraeumt "
+                      f"(bereits durch frueheren Abgleich erfasst)\n")
+
             gesamt_matches = 0
+            gesamt_wiederholung = 0
             gesamt_ohne_beleg = 0
             gesamt_neu_za = 0
             gesamt_neu_offen = 0
@@ -350,6 +375,13 @@ def main():
                         print(f"        -> {match['rechnungssteller']} ({match['waehrung']} {match['betrag']}){za_info}{fx_info}")
                         gesamt_matches += 1
                     else:
+                        # Pass 2: koennte die Transaktion zu einem schon abgeglichenen
+                        # Beleg gehoeren? Dann ist es eine Rolling-Export-Wiederholung.
+                        recall = match_transaktion_zu_beleg(trans, belege, kk_typ, include_matched=True)
+                        if recall:
+                            gesamt_wiederholung += 1
+                            continue
+
                         upsert_status = offene_posten.upsert(
                             ws_offen,
                             quelle=kk_typ,
@@ -408,6 +440,9 @@ def main():
     print(f"  ZUSAMMENFASSUNG")
     print(f"{'='*60}")
     print(f"  Abgeglichen:              {gesamt_matches}")
+    print(f"  Wiederholungen skip:      {gesamt_wiederholung}")
+    if cleanup_entfernt > 0:
+        print(f"  Offene Posten aufgeraeumt: {cleanup_entfernt}")
     print(f"  Zahlungsart ergaenzt:      {gesamt_neu_za}")
     print(f"  KK-Transaktionen ohne Beleg: {gesamt_ohne_beleg}")
     print(f"    davon neu offen:        {gesamt_neu_offen}")

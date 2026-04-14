@@ -183,8 +183,14 @@ def erkenne_bank_typ(csv_pfad: str) -> str:
     return "?"
 
 
-def match_bank_transaktion(trans: dict, belege: list[dict]) -> dict | None:
-    """Versucht eine Bank-Transaktion einem Beleg zuzuordnen."""
+def match_bank_transaktion(trans: dict, belege: list[dict], include_matched: bool = False) -> dict | None:
+    """Versucht eine Bank-Transaktion einem Beleg zuzuordnen.
+
+    include_matched=True bezieht auch bereits als "Ja" markierte Belege ein.
+    Wird im zweiten Pass genutzt, um Rolling-Export-Wiederholungen zu erkennen
+    (Bank-CSVs enthalten oft Transaktionen, die schon in einem frueheren Lauf
+    gematcht wurden — diese sollen nicht als neue offene Posten landen).
+    """
     t_betrag = trans["betrag"]
     t_datum = trans["datum"]
     t_beschr = trans["beschreibung"].upper()
@@ -196,8 +202,8 @@ def match_bank_transaktion(trans: dict, belege: list[dict]) -> dict | None:
     t_waehrung = trans["waehrung"].upper() if trans.get("waehrung") else ""
 
     for beleg in belege:
-        # Bereits abgeglichene Belege ueberspringen
-        if beleg["abgeglichen"] == "Ja":
+        # Bereits abgeglichene Belege ueberspringen (ausser im Recall-Pass)
+        if not include_matched and beleg["abgeglichen"] == "Ja":
             continue
 
         b_betrag = beleg["betrag"]
@@ -348,7 +354,30 @@ def main():
 
             ws_offen = offene_posten.ensure_sheet(wb)
 
+            # Aufraeumen: existierende offene Posten entfernen, fuer die es inzwischen
+            # einen abgeglichenen Beleg gibt (typisch bei Rolling-Exports, wo frueher
+            # als offen erfasste Bank-Transaktionen nachtraeglich einen Beleg bekommen
+            # haben oder bereits in einem frueheren Lauf korrekt gematcht wurden).
+            cleanup_entfernt = 0
+            for beleg in belege:
+                if beleg["abgeglichen"] != "Ja":
+                    continue
+                if not beleg["datum"] or not beleg["betrag"]:
+                    continue
+                n = offene_posten.resolve(
+                    ws_offen, beleg["datum"], beleg["betrag"], beleg["waehrung"]
+                )
+                if n > 0:
+                    cleanup_entfernt += n
+                    print(f"  Aufgeraeumt: {beleg['rechnungssteller'][:40]} "
+                          f"{beleg['waehrung']} {beleg['betrag']:.2f} "
+                          f"({n} offene(r) Posten entfernt)")
+            if cleanup_entfernt > 0:
+                print(f"\n  -> {cleanup_entfernt} offene Posten aufgeraeumt "
+                      f"(bereits durch frueheren Abgleich erfasst)\n")
+
             gesamt_matches = 0
+            gesamt_wiederholung = 0
             gesamt_neu_za = 0
             gesamt_neu_offen = 0
             gesamt_bereits_offen = 0
@@ -396,6 +425,14 @@ def main():
                         print(f"        -> {match['rechnungssteller']} ({match['waehrung']} {match['betrag']}){za_info}")
                         gesamt_matches += 1
                     else:
+                        # Pass 2: koennte die Transaktion zu einem schon abgeglichenen
+                        # Beleg gehoeren? Dann ist es eine Rolling-Export-Wiederholung
+                        # und soll nicht erneut als offener Posten erfasst werden.
+                        recall = match_bank_transaktion(trans, belege, include_matched=True)
+                        if recall:
+                            gesamt_wiederholung += 1
+                            continue
+
                         trans_waehrung = trans.get("waehrung") or waehrung
                         volltext = trans["beschreibung"]
                         if trans["details"]:
@@ -459,6 +496,9 @@ def main():
     print(f"  ZUSAMMENFASSUNG")
     print(f"{'='*60}")
     print(f"  Abgeglichen:           {gesamt_matches}")
+    print(f"  Wiederholungen skip:   {gesamt_wiederholung}")
+    if cleanup_entfernt > 0:
+        print(f"  Offene Posten aufgeraeumt: {cleanup_entfernt}")
     print(f"  Zahlungsart ergaenzt:   {gesamt_neu_za}")
     print(f"  Ohne Beleg:            {len(ohne_beleg_liste)}")
     print(f"    davon neu offen:     {gesamt_neu_offen}")
