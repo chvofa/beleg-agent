@@ -198,16 +198,17 @@ def match_transaktion_zu_beleg(trans: dict, belege: list[dict], kk_typ: str,
         if abs(t_betrag - b_betrag) > 0.10:
             continue
 
-        # 3. Datums-Toleranz: KK-Einkaufsdatum kann +/- 5 Tage vom Rechnungsdatum abweichen.
+        # 3. Datums-Toleranz: KK-Einkaufsdatum kann einige Wochen vor der
+        # Abrechnung liegen (Abo-Rechnungen, verspätete Erfassung). Fenster 90 Tage.
         # Ausnahme: Dauerauftrag-Belege sind einmalig erfasst, decken aber monatlich
         # wiederkehrende Transaktionen ab — Datum ignorieren.
         if b_typ == "Dauerauftrag":
             datum_score = 0.5
         elif t_datum and b_datum:
             diff = abs((t_datum - b_datum).days)
-            if diff > 30:
+            if diff > 90:
                 continue
-            datum_score = max(0, 30 - diff) / 30  # 1.0 bei gleichem Tag, 0.0 bei 30 Tagen
+            datum_score = max(0, 90 - diff) / 90
         else:
             datum_score = 0.3  # Kein Datum -> schwacher Match
 
@@ -296,7 +297,8 @@ def main():
                     )
                 elif beleg["datum"]:
                     n = offene_posten.resolve(
-                        ws_offen, beleg["datum"], beleg["betrag"], beleg["waehrung"]
+                        ws_offen, beleg["datum"], beleg["betrag"], beleg["waehrung"],
+                        rechnungssteller=beleg["rechnungssteller"],
                     )
                 else:
                     n = 0
@@ -435,6 +437,28 @@ def main():
                             gesamt_bereits_ignoriert += 1
 
                 print()
+
+            # Nachtraeglicher Cleanup: frisch gematchte Belege koennten noch alte
+            # offene_posten-Eintraege aus frueheren Laeufen haben.
+            nach_cleanup = 0
+            for beleg in belege:
+                if beleg["abgeglichen"] != "Ja":
+                    continue
+                if not beleg["betrag"]:
+                    continue
+                if beleg["typ"] == "Dauerauftrag":
+                    continue
+                if not beleg["datum"]:
+                    continue
+                n = offene_posten.resolve(
+                    ws_offen, beleg["datum"], beleg["betrag"], beleg["waehrung"],
+                    rechnungssteller=beleg["rechnungssteller"],
+                )
+                if n > 0:
+                    nach_cleanup += n
+            if nach_cleanup > 0:
+                print(f"Nach-Cleanup: {nach_cleanup} offene Posten entfernt\n")
+                cleanup_entfernt += nach_cleanup
 
             # 4. Excel speichern
             try:

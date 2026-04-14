@@ -691,6 +691,7 @@ def lege_datei_ab(dateipfad: str, daten: dict) -> bool:
             datum=daten.get("rechnungsdatum", ""),
             betrag=float(daten.get("betrag", 0) or 0),
             waehrung=daten.get("waehrung", ""),
+            rechnungssteller=daten.get("rechnungssteller", ""),
         )
         if anzahl > 0:
             log.info(f"Offene Posten aufgeloest: {anzahl}")

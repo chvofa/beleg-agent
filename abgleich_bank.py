@@ -232,16 +232,18 @@ def match_bank_transaktion(trans: dict, belege: list[dict], include_matched: boo
         if not t_ist_gs and b_typ == "Gutschrift":
             continue
 
-        # Datums-Toleranz: Bank kann ein paar Tage abweichen.
+        # Datums-Toleranz: B2B-Rechnungen koennen 60-90 Tage Zahlungsfrist
+        # haben, daher Fenster auf 120 Tage. Der Name-Match ist der Schutz
+        # vor False Positives bei weitem Fenster.
         # Ausnahme: Dauerauftrag-Belege sind einmalig erfasst, decken aber
         # monatlich wiederkehrende Bank-Transaktionen ab — Datum ignorieren.
         if b_typ == "Dauerauftrag":
             datum_score = 0.5
         elif t_datum and b_datum:
             diff = abs((t_datum - b_datum).days)
-            if diff > 45:
+            if diff > 120:
                 continue
-            datum_score = max(0, 45 - diff) / 45
+            datum_score = max(0, 120 - diff) / 120
         else:
             datum_score = 0.3
 
@@ -382,7 +384,8 @@ def main():
                     )
                 elif beleg["datum"]:
                     n = offene_posten.resolve(
-                        ws_offen, beleg["datum"], beleg["betrag"], beleg["waehrung"]
+                        ws_offen, beleg["datum"], beleg["betrag"], beleg["waehrung"],
+                        rechnungssteller=beleg["rechnungssteller"],
                     )
                 else:
                     n = 0
@@ -512,6 +515,29 @@ def main():
                             gesamt_bereits_ignoriert += 1
 
                 print()
+
+            # Nachtraeglicher Cleanup: die im Match-Loop frisch auf "Ja" gesetzten
+            # Belege koennten noch alte offene_posten-Eintraege aus frueheren Laeufen
+            # haben. Diese jetzt aufraeumen.
+            nach_cleanup = 0
+            for beleg in belege:
+                if beleg["abgeglichen"] != "Ja":
+                    continue
+                if not beleg["betrag"]:
+                    continue
+                if beleg["typ"] == "Dauerauftrag":
+                    continue  # schon im ersten Cleanup behandelt
+                if not beleg["datum"]:
+                    continue
+                n = offene_posten.resolve(
+                    ws_offen, beleg["datum"], beleg["betrag"], beleg["waehrung"],
+                    rechnungssteller=beleg["rechnungssteller"],
+                )
+                if n > 0:
+                    nach_cleanup += n
+            if nach_cleanup > 0:
+                print(f"Nach-Cleanup: {nach_cleanup} offene Posten entfernt\n")
+                cleanup_entfernt += nach_cleanup
 
             # Speichern
             try:

@@ -176,14 +176,22 @@ def upsert(ws, quelle: str, datum, betrag: float, waehrung: str, text: str) -> s
     return "neu"
 
 
-def resolve(ws, datum, betrag: float, waehrung: str) -> int:
+def resolve(ws, datum, betrag: float, waehrung: str,
+            rechnungssteller: str = "", datum_fenster: int = 120,
+            betrag_toleranz: float = 0.10) -> int:
     """Loescht offene Posten die auf einen neu abgelegten Beleg passen.
 
     Match-Kriterien:
     - Status muss "Offen" sein (ignorierte Posten bleiben als Audit-Spur)
     - Waehrung muss exakt stimmen
-    - Betrag muss stimmen (Toleranz 0.02)
-    - Datum innerhalb +/- 30 Tagen
+    - Betrag innerhalb betrag_toleranz (default 0.10 CHF — deckt Rundungsdifferenzen ab)
+    - Datum innerhalb +/- datum_fenster Tagen (default 120 — deckt B2B-Rechnungen
+      mit 60-90 Tagen Zahlungsfrist ab)
+    - Falls rechnungssteller uebergeben wird: mindestens ein Namens-Wort (>2 Zeichen)
+      muss im Buchungstext des offenen Postens vorkommen. Das verhindert False
+      Positives bei weiterem Datumsfenster, wo z.B. zwei unabhaengige 100 CHF-
+      Betraege zufaellig zusammen matchen koennten.
+
     Gibt die Anzahl geloeschter Zeilen zurueck.
     """
     d_norm = _norm_datum(datum)
@@ -193,6 +201,12 @@ def resolve(ws, datum, betrag: float, waehrung: str) -> int:
     except ValueError:
         return 0
 
+    rs_teile: list[str] = []
+    if rechnungssteller:
+        import re
+        rs_clean = re.sub(r"\([^)]*\)", "", rechnungssteller.upper())
+        rs_teile = [t for t in rs_clean.split() if len(t) > 2]
+
     zu_loeschen = []
     for row_idx in range(2, ws.max_row + 1):
         r = _row_to_dict(ws, row_idx)
@@ -200,17 +214,20 @@ def resolve(ws, datum, betrag: float, waehrung: str) -> int:
             continue
         if r["waehrung"] != w_norm:
             continue
-        if abs(r["betrag"] - float(betrag)) > 0.02:
+        if abs(r["betrag"] - float(betrag)) > betrag_toleranz:
             continue
         try:
             r_datum = datetime.strptime(r["datum"], "%Y-%m-%d").date()
         except ValueError:
             continue
-        if abs((r_datum - d_ref).days) > 30:
+        if abs((r_datum - d_ref).days) > datum_fenster:
             continue
+        if rs_teile:
+            text_upper = r["text"].upper()
+            if not any(t in text_upper for t in rs_teile):
+                continue
         zu_loeschen.append(row_idx)
 
-    # Von hinten loeschen damit Indices stabil bleiben
     for row_idx in sorted(zu_loeschen, reverse=True):
         ws.delete_rows(row_idx, 1)
 
@@ -340,7 +357,8 @@ def list_offen_standalone() -> list[dict]:
     return result
 
 
-def resolve_standalone(datum, betrag: float, waehrung: str) -> int:
+def resolve_standalone(datum, betrag: float, waehrung: str,
+                        rechnungssteller: str = "") -> int:
     """Loest offene Posten auf (mit eigenem Lock). Aufruf aus beleg_agent.lege_datei_ab."""
     import os
     if not os.path.exists(config.EXCEL_PROTOKOLL):
@@ -352,7 +370,7 @@ def resolve_standalone(datum, betrag: float, waehrung: str) -> int:
                 wb.close()
                 return 0
             ws = wb[SHEET_NAME]
-            anzahl = resolve(ws, datum, betrag, waehrung)
+            anzahl = resolve(ws, datum, betrag, waehrung, rechnungssteller=rechnungssteller)
             if anzahl > 0:
                 wb.save(config.EXCEL_PROTOKOLL)
             wb.close()
