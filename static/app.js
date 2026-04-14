@@ -213,6 +213,7 @@ function renderProtocol(rows) {
         return `<tr>
             <td style="text-align:center; padding:0.4rem">${icon}</td>
             <td>${row.Datum_Rechnung || ''}</td>
+            <td class="cell-muted">${row.Valutadatum || ''}</td>
             <td>${row.Rechnungssteller || ''}</td>
             <td>${row.Typ || ''}</td>
             <td style="text-align:right; font-variant-numeric:tabular-nums">${formatBetrag(row.Betrag, row.Währung)}</td>

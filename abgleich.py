@@ -188,6 +188,7 @@ def match_transaktion_zu_beleg(trans: dict, belege: list[dict], kk_typ: str,
         b_datum = beleg["datum"]
         b_rs = beleg["rechnungssteller"].upper()
         b_waehrung = beleg["waehrung"].upper()
+        b_typ = beleg["typ"]
 
         # 1. Waehrung muss stimmen: Beleg-Waehrung == Originalwaehrung der Transaktion
         if t_orig_w and b_waehrung and t_orig_w != b_waehrung:
@@ -197,8 +198,12 @@ def match_transaktion_zu_beleg(trans: dict, belege: list[dict], kk_typ: str,
         if abs(t_betrag - b_betrag) > 0.10:
             continue
 
-        # 3. Datums-Toleranz: KK-Einkaufsdatum kann +/- 5 Tage vom Rechnungsdatum abweichen
-        if t_datum and b_datum:
+        # 3. Datums-Toleranz: KK-Einkaufsdatum kann +/- 5 Tage vom Rechnungsdatum abweichen.
+        # Ausnahme: Dauerauftrag-Belege sind einmalig erfasst, decken aber monatlich
+        # wiederkehrende Transaktionen ab — Datum ignorieren.
+        if b_typ == "Dauerauftrag":
+            datum_score = 0.5
+        elif t_datum and b_datum:
             diff = abs((t_datum - b_datum).days)
             if diff > 30:
                 continue
@@ -283,11 +288,18 @@ def main():
             for beleg in belege:
                 if beleg["abgeglichen"] != "Ja":
                     continue
-                if not beleg["datum"] or not beleg["betrag"]:
+                if not beleg["betrag"]:
                     continue
-                n = offene_posten.resolve(
-                    ws_offen, beleg["datum"], beleg["betrag"], beleg["waehrung"]
-                )
+                if beleg["typ"] == "Dauerauftrag":
+                    n = offene_posten.resolve_by_name(
+                        ws_offen, beleg["rechnungssteller"], beleg["betrag"], beleg["waehrung"]
+                    )
+                elif beleg["datum"]:
+                    n = offene_posten.resolve(
+                        ws_offen, beleg["datum"], beleg["betrag"], beleg["waehrung"]
+                    )
+                else:
+                    n = 0
                 if n > 0:
                     cleanup_entfernt += n
                     print(f"  Aufgeraeumt: {beleg['rechnungssteller'][:40]} "
@@ -335,6 +347,11 @@ def main():
                         # Match gefunden -> Abgeglichen = Ja
                         ws.cell(row=row, column=config.COL_ABGEGLICHEN).value = "Ja"
 
+                        # Valutadatum aus KK-Transaktion ins Protokoll schreiben
+                        if trans["datum"]:
+                            ws.cell(row=row, column=config.COL_VALUTADATUM).value = \
+                                trans["datum"].strftime("%Y-%m-%d")
+
                         # Zahlungsart ergaenzen wenn leer
                         alte_za = ws.cell(row=row, column=config.COL_ZAHLUNGSART).value or ""
                         if not alte_za:
@@ -379,6 +396,11 @@ def main():
                         # Beleg gehoeren? Dann ist es eine Rolling-Export-Wiederholung.
                         recall = match_transaktion_zu_beleg(trans, belege, kk_typ, include_matched=True)
                         if recall:
+                            # Valutadatum nachtraeglich setzen wenn leer
+                            if (trans["datum"] and recall["typ"] != "Dauerauftrag"
+                                    and not ws.cell(row=recall["row"], column=config.COL_VALUTADATUM).value):
+                                ws.cell(row=recall["row"], column=config.COL_VALUTADATUM).value = \
+                                    trans["datum"].strftime("%Y-%m-%d")
                             gesamt_wiederholung += 1
                             continue
 

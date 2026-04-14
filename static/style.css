@@ -278,6 +278,7 @@ tr:hover { background: rgba(37, 99, 235, 0.03); }
 
 .cell-green { color: var(--green); font-weight: 600; }
 .cell-red { color: var(--red); }
+.cell-muted { color: #888; font-size: 0.9em; }
 
 .beleg-icon {
     font-size: 1.1rem;

@@ -217,6 +217,51 @@ def resolve(ws, datum, betrag: float, waehrung: str) -> int:
     return len(zu_loeschen)
 
 
+def resolve_by_name(ws, rechnungssteller: str, betrag: float, waehrung: str) -> int:
+    """Loescht offene Posten die zu einem Dauerauftrag-Beleg passen.
+
+    Im Gegensatz zu resolve() wird kein Datumsfilter angewandt — Daueraufträge
+    sind einmalig erfasst, decken aber monatlich wiederkehrende Bank/KK-
+    Transaktionen ueber Jahre ab.
+
+    Match-Kriterien:
+    - Status muss "Offen" sein
+    - Waehrung muss exakt stimmen
+    - Betrag muss stimmen (Toleranz 0.02)
+    - Mindestens ein Rechnungssteller-Wort > 2 Zeichen muss im Buchungstext vorkommen
+
+    Gibt die Anzahl geloeschter Zeilen zurueck.
+    """
+    w_norm = (waehrung or "").strip().upper()
+    rs_upper = (rechnungssteller or "").upper()
+    # Klammer-Hinweise wie "(Büromiete)" ignorieren, damit der Matcher
+    # greift auch wenn der OCR einen Zusatz extrahiert hat.
+    import re
+    rs_clean = re.sub(r"\([^)]*\)", "", rs_upper)
+    rs_teile = [t for t in rs_clean.split() if len(t) > 2]
+    if not rs_teile:
+        return 0
+
+    zu_loeschen = []
+    for row_idx in range(2, ws.max_row + 1):
+        r = _row_to_dict(ws, row_idx)
+        if r["status"] != "Offen":
+            continue
+        if r["waehrung"] != w_norm:
+            continue
+        if abs(r["betrag"] - float(betrag)) > 0.02:
+            continue
+        text_upper = r["text"].upper()
+        if not any(t in text_upper for t in rs_teile):
+            continue
+        zu_loeschen.append(row_idx)
+
+    for row_idx in sorted(zu_loeschen, reverse=True):
+        ws.delete_rows(row_idx, 1)
+
+    return len(zu_loeschen)
+
+
 def list_offen(ws) -> list[dict]:
     """Gibt alle offenen Posten zurueck (nur Status=Offen)."""
     result = []

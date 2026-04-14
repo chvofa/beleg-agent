@@ -64,6 +64,7 @@ def lade_bank_transaktionen(csv_pfad: str) -> tuple[str, list[dict]]:
     skip_buchungstext = bp.get("skip_buchungstext", [])
 
     transaktionen = []
+    current_master_idx = None
     for row in reader:
         datum_str = _get_col(row, sp["datum"])
 
@@ -140,9 +141,13 @@ def lade_bank_transaktionen(csv_pfad: str) -> tuple[str, list[dict]]:
                 "beschreibung": beschreibung,
                 "details": details,
                 "waehrung": waehrung,
+                "ist_sammelauftrag_master": False,
             })
+            current_master_idx = len(transaktionen) - 1
         else:
-            # Unterzeile eines Sammelauftrags
+            # Unterzeile eines Sammelauftrags — markiere Vorgaenger als Master
+            if current_master_idx is not None:
+                transaktionen[current_master_idx]["ist_sammelauftrag_master"] = True
             transaktionen.append({
                 "datum": transaktionen[-1]["datum"] if transaktionen else None,
                 "betrag": betrag,
@@ -150,6 +155,7 @@ def lade_bank_transaktionen(csv_pfad: str) -> tuple[str, list[dict]]:
                 "beschreibung": beschreibung,
                 "details": details,
                 "waehrung": waehrung,
+                "ist_sammelauftrag_master": False,
             })
 
     return waehrung, transaktionen
@@ -226,8 +232,12 @@ def match_bank_transaktion(trans: dict, belege: list[dict], include_matched: boo
         if not t_ist_gs and b_typ == "Gutschrift":
             continue
 
-        # Datums-Toleranz: Bank kann ein paar Tage abweichen
-        if t_datum and b_datum:
+        # Datums-Toleranz: Bank kann ein paar Tage abweichen.
+        # Ausnahme: Dauerauftrag-Belege sind einmalig erfasst, decken aber
+        # monatlich wiederkehrende Bank-Transaktionen ab — Datum ignorieren.
+        if b_typ == "Dauerauftrag":
+            datum_score = 0.5
+        elif t_datum and b_datum:
             diff = abs((t_datum - b_datum).days)
             if diff > 45:
                 continue
@@ -362,11 +372,20 @@ def main():
             for beleg in belege:
                 if beleg["abgeglichen"] != "Ja":
                     continue
-                if not beleg["datum"] or not beleg["betrag"]:
+                if not beleg["betrag"]:
                     continue
-                n = offene_posten.resolve(
-                    ws_offen, beleg["datum"], beleg["betrag"], beleg["waehrung"]
-                )
+                # Dauerauftrag-Belege matchen monatliche Wiederholungen — kein Datumsfilter,
+                # dafuer Name+Betrag. Alle anderen Belege verwenden den normalen Datumspfad.
+                if beleg["typ"] == "Dauerauftrag":
+                    n = offene_posten.resolve_by_name(
+                        ws_offen, beleg["rechnungssteller"], beleg["betrag"], beleg["waehrung"]
+                    )
+                elif beleg["datum"]:
+                    n = offene_posten.resolve(
+                        ws_offen, beleg["datum"], beleg["betrag"], beleg["waehrung"]
+                    )
+                else:
+                    n = 0
                 if n > 0:
                     cleanup_entfernt += n
                     print(f"  Aufgeraeumt: {beleg['rechnungssteller'][:40]} "
@@ -397,6 +416,19 @@ def main():
                 print(f"  {len(transaktionen)} Transaktionen total, {len(trans_aktuell)} ab {min_jahr}\n")
 
                 for trans in trans_aktuell:
+                    # Sammelauftrag-Master uebergehen — die Einzelposten werden
+                    # separat als Kind-Zeilen verarbeitet, die Master-Zeile ist nur
+                    # ein aggregierter Summen-Eintrag ohne eigenen Beleg. Dabei auch
+                    # alte offene-Posten-Eintraege fuer denselben Master loeschen
+                    # (entsteht bei Rolling-Exports aus der Zeit vor dem Master-Skip).
+                    if trans.get("ist_sammelauftrag_master"):
+                        trans_w = trans.get("waehrung") or waehrung
+                        if trans["datum"]:
+                            offene_posten.resolve(
+                                ws_offen, trans["datum"], trans["betrag"], trans_w
+                            )
+                        continue
+
                     match = match_bank_transaktion(trans, belege)
 
                     datum_str = trans["datum"].strftime("%d.%m.%Y") if trans["datum"] else "?"
@@ -410,6 +442,11 @@ def main():
 
                         row = match["row"]
                         ws.cell(row=row, column=config.COL_ABGEGLICHEN).value = "Ja"
+
+                        # Valutadatum aus Bank-Transaktion ins Protokoll schreiben
+                        if trans["datum"]:
+                            ws.cell(row=row, column=config.COL_VALUTADATUM).value = \
+                                trans["datum"].strftime("%Y-%m-%d")
 
                         alte_za = ws.cell(row=row, column=config.COL_ZAHLUNGSART).value or ""
                         if not alte_za:
@@ -430,6 +467,14 @@ def main():
                         # und soll nicht erneut als offener Posten erfasst werden.
                         recall = match_bank_transaktion(trans, belege, include_matched=True)
                         if recall:
+                            # Valutadatum auch nachtraeglich setzen, wenn der Beleg
+                            # beim frueheren Abgleich noch keine Valuta bekommen hat
+                            # und es sich nicht um einen Dauerauftrag handelt (dort
+                            # wechselt die Valuta monatlich).
+                            if (trans["datum"] and recall["typ"] != "Dauerauftrag"
+                                    and not ws.cell(row=recall["row"], column=config.COL_VALUTADATUM).value):
+                                ws.cell(row=recall["row"], column=config.COL_VALUTADATUM).value = \
+                                    trans["datum"].strftime("%Y-%m-%d")
                             gesamt_wiederholung += 1
                             continue
 
