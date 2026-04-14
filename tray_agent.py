@@ -58,21 +58,23 @@ def erstelle_icon(farbe="green", size=256):
         "gray": (110, 118, 129),
     }
 
-    # macOS: "Laeuft"-Zustand in Weiss statt Gruen — fuegt sich ruhiger in
-    # die Menuleiste ein. Rot/Gelb bleiben auffaellig fuer Fehler/Warnung.
-    macos_weiss = sys.platform == "darwin" and farbe == "green"
-    if macos_weiss:
-        fill = (255, 255, 255)
-        text_color = (40, 40, 40)
+    # macOS: "Laeuft"-Zustand als Template-Image (rein schwarz auf transparent).
+    # Das Flag wird in BelegTray._apply_template_flag gesetzt — macOS invertiert
+    # dann automatisch fuer Dark/Light Mode und Highlight-Zustand.
+    macos_template = sys.platform == "darwin" and farbe == "green"
+    if macos_template:
+        fill = (0, 0, 0, 255)
+        text_color = (0, 0, 0, 255)
     else:
         fill = farben.get(farbe, farben["gray"])
         text_color = (255, 255, 255)
 
     margin = size // 16
-    if macos_weiss:
+    if macos_template:
         draw.ellipse(
             [margin, margin, size - margin, size - margin],
-            fill=fill,
+            outline=fill,
+            width=max(4, size // 20),
         )
     else:
         draw.ellipse(
@@ -134,6 +136,21 @@ class BelegTray:
             self.icon.icon = erstelle_icon(farbe)
             labels = {"green": "Laeuft", "red": "Gestoppt", "yellow": "Warnung"}
             self.icon.title = f"Beleg-Agent: {labels.get(farbe, farbe)}"
+            self._apply_template_flag(farbe)
+
+    def _apply_template_flag(self, farbe):
+        """macOS: markiert das NSImage als Template, damit macOS die Farbe
+        dynamisch an Menuleisten-Hintergrund, Dark Mode und Highlight anpasst.
+        Nur fuer den ruhigen "Laeuft"-Zustand — Rot/Gelb bleiben farbig."""
+        if sys.platform != "darwin" or not self.icon:
+            return
+        ns_image = getattr(self.icon, "_icon_image", None)
+        if ns_image is None:
+            return
+        try:
+            ns_image.setTemplate_(farbe == "green")
+        except Exception:
+            pass
 
     def monitor_loop(self):
         """Aktualisiert das Icon basierend auf der Status-Datei."""
@@ -223,7 +240,11 @@ class BelegTray:
             "Beleg-Agent: Läuft",
             menu,
         )
-        self.icon.run()
+        def _setup(icon):
+            icon.visible = True
+            self._apply_template_flag("green")
+
+        self.icon.run(setup=_setup)
 
 
 if __name__ == "__main__":
