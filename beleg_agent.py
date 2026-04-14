@@ -150,6 +150,9 @@ Antworte ausschließlich mit validem JSON, kein anderer Text.
   "typ": "Rechnung",
   "zahlungsart": "",
   "ist_paypal": false,
+  "referenz_nr": "",
+  "ist_sammelbeleg": false,
+  "einzelposten": [],
   "bemerkungen": "",
   "confidence": {
     "rechnungssteller": 0.95,
@@ -199,6 +202,25 @@ Regeln:
 - bemerkungen: Zusätzliche Infos, z.B. Trinkgeld bei Restaurants. Leer lassen wenn nichts Besonderes.
   Format Trinkgeld: "Trinkgeld: [Währung] [Betrag] (Rechnungsbetrag [Währung] [Subtotal])"
   Beispiel: "Trinkgeld: CHF 7.50 (Rechnungsbetrag CHF 87.50)"
+- referenz_nr: Eindeutige Identifikation der Transaktion/Rechnung, wenn auf dem Beleg vorhanden.
+  Moegliche Quellen (Reihenfolge der Prioritaet):
+    1. Rechnungsnummer / Invoice Number / Beleg-Nr / Receipt ID
+    2. Auftragsnummer / Order Number / Bestellnummer
+    3. Transaktions-ID / Transaction ID / Authorization Code
+    4. QR-Referenz / Referenz-Nr (bei Schweizer QR-Rechnungen)
+  Leer lassen wenn keine Referenz erkennbar. KEINE IBAN, keine Telefonnummer, keine Adresse.
+
+- ist_sammelbeleg: true, wenn der Beleg eine Tabelle mit MEHREREN Einzeltransaktionen enthaelt,
+  bei denen jede eine eigene Datum+Betrag-Kombination hat (z.B. Parkingpay-Monatsabrechnung,
+  SBB-Halbtax-Aufstellung, PayPal-Monatsuebersicht, KK-Monatsabrechnung).
+  false bei normalen Einzelrechnungen.
+
+- einzelposten: NUR befuellen wenn ist_sammelbeleg=true. Liste von Objekten mit:
+    {"datum": "YYYY-MM-DD", "betrag": 1.23, "beschreibung": "Ort/Beschreibung", "referenz_nr": ""}
+  Der betrag ist der Einzelbetrag des jeweiligen Postens (nicht der Gesamtbetrag).
+  Alle Einzelposten addiert ergeben den Gesamtbetrag des Belegs.
+  Bei Einzelrechnung: leere Liste [].
+
 - confidence: Dein Vertrauenswert 0.0-1.0 für jedes Feld.
   Setze zahlungsart-confidence auf 0.0 wenn du keine Zahlungsinfo findest (Feld bleibt leer).
 """
@@ -505,8 +527,36 @@ def erstelle_excel_wenn_noetig():
     log.info(f"Excel-Protokoll erstellt: {config.EXCEL_PROTOKOLL}")
 
 
+def _baue_protokoll_zeile(daten: dict, original_name: str, ablagepfad: str,
+                          datum: str, betrag, bemerkung: str, referenz_nr: str) -> list:
+    """Baut eine Zeile fuer das Excel-Protokoll."""
+    return [
+        datum,                                           # 1  Datum_Rechnung
+        daten.get("rechnungssteller", ""),                # 2  Rechnungssteller
+        daten.get("typ", "Rechnung"),                     # 3  Typ
+        betrag,                                           # 4  Betrag
+        daten.get("waehrung", ""),                        # 5  Währung
+        daten.get("zahlungsart", ""),                     # 6  Zahlungsart
+        "Ja" if daten.get("ist_paypal") else "Nein",      # 7  PayPal
+        "",                                               # 8  Währung_Belastet
+        "",                                               # 9  Betrag_Belastet
+        "Nein",                                           # 10 Abgeglichen
+        bemerkung,                                        # 11 Bemerkungen
+        original_name,                                    # 12 Originaldateiname
+        ablagepfad,                                       # 13 Ablagepfad
+        daten.get("gesamt_confidence", 0),                # 14 Confidence_Score
+        datetime.now().strftime("%Y-%m-%d %H:%M"),        # 15 Verarbeitungsdatum
+        "",                                               # 16 Valutadatum (erst beim Abgleich)
+        referenz_nr,                                      # 17 Referenz_Nr
+    ]
+
+
 def schreibe_protokoll(daten: dict, original_name: str, ablagepfad: str):
-    """Fügt einen neuen Eintrag ins Excel-Protokoll ein."""
+    """Fügt einen neuen Eintrag ins Excel-Protokoll ein.
+
+    Bei Sammelbelegen (ist_sammelbeleg=True) werden N Zeilen geschrieben,
+    eine pro Einzelposten, alle mit demselben Ablagepfad.
+    """
     erstelle_excel_wenn_noetig()
 
     try:
@@ -514,27 +564,43 @@ def schreibe_protokoll(daten: dict, original_name: str, ablagepfad: str):
             wb = openpyxl.load_workbook(config.EXCEL_PROTOKOLL)
             ws = wb.active
 
-            neue_zeile = [
-                daten.get("rechnungsdatum", ""),                # 1  Datum_Rechnung
-                daten.get("rechnungssteller", ""),               # 2  Rechnungssteller
-                daten.get("typ", "Rechnung"),                    # 3  Typ
-                daten.get("betrag", 0),                          # 4  Betrag
-                daten.get("waehrung", ""),                        # 5  Währung
-                daten.get("zahlungsart", ""),                     # 6  Zahlungsart
-                "Ja" if daten.get("ist_paypal") else "Nein",     # 7  PayPal
-                "",                                               # 8  Währung_Belastet
-                "",                                               # 9  Betrag_Belastet
-                "Nein",                                           # 10 Abgeglichen
-                daten.get("bemerkungen", ""),                     # 11 Bemerkungen
-                original_name,                                    # 12 Originaldateiname
-                ablagepfad,                                       # 13 Ablagepfad
-                daten.get("gesamt_confidence", 0),                # 14 Confidence_Score
-                datetime.now().strftime("%Y-%m-%d %H:%M"),        # 15 Verarbeitungsdatum
-            ]
-            ws.append(neue_zeile)
+            ist_sammel = bool(daten.get("ist_sammelbeleg"))
+            einzelposten = daten.get("einzelposten") or []
+
+            if ist_sammel and einzelposten:
+                # N Zeilen, eine pro Einzelposten, alle mit dem gleichen Ablagepfad
+                n = 0
+                for pos in einzelposten:
+                    try:
+                        pos_betrag = float(pos.get("betrag", 0) or 0)
+                    except (ValueError, TypeError):
+                        continue
+                    pos_datum = str(pos.get("datum") or daten.get("rechnungsdatum", ""))
+                    pos_beschr = str(pos.get("beschreibung") or "").strip()
+                    pos_ref = str(pos.get("referenz_nr") or "").strip()
+                    bemerkung = f"Sammelbeleg: {pos_beschr}" if pos_beschr else "Sammelbeleg"
+                    zeile = _baue_protokoll_zeile(
+                        daten, original_name, ablagepfad,
+                        datum=pos_datum, betrag=pos_betrag,
+                        bemerkung=bemerkung, referenz_nr=pos_ref,
+                    )
+                    ws.append(zeile)
+                    n += 1
+                log.info(f"Sammelbeleg: {n} Einzelposten ins Protokoll geschrieben")
+            else:
+                # Normale Einzelrechnung
+                zeile = _baue_protokoll_zeile(
+                    daten, original_name, ablagepfad,
+                    datum=daten.get("rechnungsdatum", ""),
+                    betrag=daten.get("betrag", 0),
+                    bemerkung=daten.get("bemerkungen", ""),
+                    referenz_nr=str(daten.get("referenz_nr") or "").strip(),
+                )
+                ws.append(zeile)
+                log.info("Protokoll-Eintrag geschrieben.")
+
             wb.save(config.EXCEL_PROTOKOLL)
             wb.close()
-            log.info("Protokoll-Eintrag geschrieben.")
     except Exception as e:
         log.error(f"Fehler beim Schreiben ins Excel-Protokoll: {e}")
         log.error("Ablage wird trotzdem durchgeführt.")

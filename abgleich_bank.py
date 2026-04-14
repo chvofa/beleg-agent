@@ -75,6 +75,9 @@ def lade_bank_transaktionen(csv_pfad: str) -> tuple[str, list[dict]]:
         # Details-Spalte
         details = _get_col(row, sp.get("details", [])).strip().strip('"')
 
+        # Referenz-Nr (Transaktions-Nr) fuer eindeutigen Abgleich
+        referenz = _get_col(row, sp.get("referenz", [])).strip().strip('"')
+
         # Betrag bestimmen
         belastung_str = _get_col(row, sp["belastung"])
         gutschrift_str = _get_col(row, sp["gutschrift"])
@@ -141,6 +144,7 @@ def lade_bank_transaktionen(csv_pfad: str) -> tuple[str, list[dict]]:
                 "beschreibung": beschreibung,
                 "details": details,
                 "waehrung": waehrung,
+                "referenz": referenz,
                 "ist_sammelauftrag_master": False,
             })
             current_master_idx = len(transaktionen) - 1
@@ -155,6 +159,7 @@ def lade_bank_transaktionen(csv_pfad: str) -> tuple[str, list[dict]]:
                 "beschreibung": beschreibung,
                 "details": details,
                 "waehrung": waehrung,
+                "referenz": referenz,
                 "ist_sammelauftrag_master": False,
             })
 
@@ -202,6 +207,17 @@ def match_bank_transaktion(trans: dict, belege: list[dict], include_matched: boo
     t_beschr = trans["beschreibung"].upper()
     t_details = trans["details"].upper()
     t_ist_gs = trans["ist_gutschrift"]
+    t_ref = (trans.get("referenz") or "").strip()
+
+    # Priority 1: Exakter Referenz-Match — wenn Transaktions-Nr identisch mit Beleg-Ref,
+    # ist es eindeutig dasselbe Event. Kein Name/Datum/Betrag mehr noetig.
+    if t_ref:
+        for beleg in belege:
+            if not include_matched and beleg["abgeglichen"] == "Ja":
+                continue
+            b_ref = (beleg.get("referenz") or "").strip()
+            if b_ref and b_ref == t_ref:
+                return beleg
 
     beste_matches = []
 
@@ -362,6 +378,7 @@ def main():
                     "typ": str(ws.cell(row=row_idx, column=config.COL_TYP).value or "Rechnung").strip(),
                     "zahlungsart": str(ws.cell(row=row_idx, column=config.COL_ZAHLUNGSART).value or "").strip(),
                     "abgeglichen": str(ws.cell(row=row_idx, column=config.COL_ABGEGLICHEN).value or "").strip(),
+                    "referenz": str(ws.cell(row=row_idx, column=config.COL_REFERENZ).value or "").strip(),
                 })
 
             ws_offen = offene_posten.ensure_sheet(wb)
@@ -451,6 +468,10 @@ def main():
                             ws.cell(row=row, column=config.COL_VALUTADATUM).value = \
                                 trans["datum"].strftime("%Y-%m-%d")
 
+                        # Referenz-Nr auch eintragen wenn der Beleg noch keine hat
+                        if trans.get("referenz") and not ws.cell(row=row, column=config.COL_REFERENZ).value:
+                            ws.cell(row=row, column=config.COL_REFERENZ).value = trans["referenz"]
+
                         alte_za = ws.cell(row=row, column=config.COL_ZAHLUNGSART).value or ""
                         if not alte_za:
                             ws.cell(row=row, column=config.COL_ZAHLUNGSART).value = "Überweisung"
@@ -470,14 +491,14 @@ def main():
                         # und soll nicht erneut als offener Posten erfasst werden.
                         recall = match_bank_transaktion(trans, belege, include_matched=True)
                         if recall:
-                            # Valutadatum auch nachtraeglich setzen, wenn der Beleg
-                            # beim frueheren Abgleich noch keine Valuta bekommen hat
-                            # und es sich nicht um einen Dauerauftrag handelt (dort
-                            # wechselt die Valuta monatlich).
-                            if (trans["datum"] and recall["typ"] != "Dauerauftrag"
-                                    and not ws.cell(row=recall["row"], column=config.COL_VALUTADATUM).value):
-                                ws.cell(row=recall["row"], column=config.COL_VALUTADATUM).value = \
-                                    trans["datum"].strftime("%Y-%m-%d")
+                            # Valutadatum + Referenz-Nr nachtraeglich setzen, wenn leer
+                            # und Beleg nicht Dauerauftrag (dort wechselt's monatlich).
+                            if recall["typ"] != "Dauerauftrag":
+                                if trans["datum"] and not ws.cell(row=recall["row"], column=config.COL_VALUTADATUM).value:
+                                    ws.cell(row=recall["row"], column=config.COL_VALUTADATUM).value = \
+                                        trans["datum"].strftime("%Y-%m-%d")
+                                if trans.get("referenz") and not ws.cell(row=recall["row"], column=config.COL_REFERENZ).value:
+                                    ws.cell(row=recall["row"], column=config.COL_REFERENZ).value = trans["referenz"]
                             gesamt_wiederholung += 1
                             continue
 

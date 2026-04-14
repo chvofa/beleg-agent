@@ -93,6 +93,7 @@ EXCEL_SPALTEN = [
     "Confidence_Score",     # 14
     "Verarbeitungsdatum",   # 15
     "Valutadatum",          # 16 - Tatsaechliches Buchungsdatum der Bank/KK-Transaktion (aus Abgleich)
+    "Referenz_Nr",          # 17 - Transaktions-/Auftragsnummer fuer eindeutigen Abgleich
 ]
 
 # ── Spalten-Nummern (für Code-Referenzen) ─────────────────────────────────
@@ -112,6 +113,7 @@ COL_ABLAGEPFAD = 13
 COL_CONFIDENCE = 14
 COL_VERARBEITUNGSDATUM = 15
 COL_VALUTADATUM = 16
+COL_REFERENZ = 17
 
 # ── Bank-/KK-Abgleich (für späteres Reconciliation-Feature) ──────────────
 # Pfade zu CSV-Exporten der Bank-/KK-Auszüge

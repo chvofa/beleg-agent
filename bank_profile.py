@@ -102,6 +102,7 @@ UBS_BANK = {
         "belastung":      ["Belastung"],
         "gutschrift":     ["Gutschrift"],
         "einzelbetrag":   ["Einzelbetrag"],
+        "referenz":       ["Transaktions-Nr.", "Transaktions-Nr"],
     },
     "skip_beschreibung": [
         "Dienstleistungspreisabschluss",

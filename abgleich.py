@@ -156,6 +156,7 @@ def lade_excel_belege() -> tuple[openpyxl.Workbook, list[dict]]:
             "typ": str(ws.cell(row=row_idx, column=config.COL_TYP).value or "").strip(),
             "zahlungsart": str(ws.cell(row=row_idx, column=config.COL_ZAHLUNGSART).value or "").strip(),
             "abgeglichen": str(ws.cell(row=row_idx, column=config.COL_ABGEGLICHEN).value or "").strip(),
+            "referenz": str(ws.cell(row=row_idx, column=config.COL_REFERENZ).value or "").strip(),
         })
 
     return wb, belege
