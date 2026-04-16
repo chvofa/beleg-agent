@@ -29,6 +29,10 @@
         <div class="stat-value">{{ stats.offene_posten_count }}</div>
         <div class="stat-label">Offene Posten</div>
     </a>
+    <a href="/debitoren" class="stat-card {{ 'warning' if stats.debitoren_offen > 0 else '' }}" title="Offene Ausgangsrechnungen">
+        <div class="stat-value">{{ stats.debitoren_offen }}</div>
+        <div class="stat-label">Debitoren offen</div>
+    </a>
     <a href="/review" class="stat-card {{ 'danger' if stats.pruefen_count > 0 else '' }}" title="Belege prüfen">
         <div class="stat-value">{{ stats.pruefen_count }}</div>
         <div class="stat-label">Zur Prüfung</div>

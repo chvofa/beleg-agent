@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title_suffix %} – Debitoren{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem">
+    <h1 class="page-title" style="margin-bottom:0">Debitoren</h1>
+    <div class="btn-group">
+        <label class="btn btn-sm" style="cursor:pointer">
+            Getharvest CSV importieren
+            <input type="file" id="harvest-csv-input" accept=".csv" style="display:none">
+        </label>
+    </div>
+</div>
+
+<p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem">
+    Offene Ausgangsrechnungen aus Getharvest. Quelle der Wahrheit ist Getharvest —
+    beim naechsten Import werden bezahlte Rechnungen automatisch entfernt.
+</p>
+
+<div id="import-terminal" class="terminal" style="display:none; margin-bottom:1rem">Bereit.</div>
+
+<div class="card">
+    <div id="deb-status" style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.75rem">
+        Lade …
+    </div>
+    <div class="table-wrap">
+        <table id="deb-table">
+            <thead>
+                <tr>
+                    <th>Kunde</th>
+                    <th>Rechnungsdatum</th>
+                    <th>Faellig</th>
+                    <th>Betreff</th>
+                    <th style="text-align:right">Betrag</th>
+                    <th>Waehrung</th>
+                    <th>Status</th>
+                    <th style="width:140px">Aktion</th>
+                </tr>
+            </thead>
+            <tbody id="deb-tbody"></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Abschreiben-Dialog -->
+<div id="deb-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center">
+    <div class="card" style="max-width:480px; width:90%">
+        <div class="card-title">Forderung abschreiben</div>
+        <p id="deb-modal-info" style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.75rem"></p>
+        <label style="display:block; margin-bottom:0.5rem">
+            <strong>Grund / Notiz (optional)</strong>
+            <input type="text" id="deb-modal-notiz" maxlength="200"
+                   style="width:100%; padding:0.4rem; margin-top:0.25rem"
+                   placeholder="z.B. Insolvenz, Kleinbetrag, Vergleich">
+        </label>
+        <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:1rem">
+            <button class="btn btn-sm" onclick="debModalClose()">Abbrechen</button>
+            <button class="btn btn-danger btn-sm" onclick="debModalConfirm()">Abschreiben</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let debCurrentId = null;
+const today = new Date().toISOString().slice(0, 10);
+
+function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, c => (
+        {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+    ));
+}
+
+function formatBetrag(v) {
+    if (typeof v !== 'number') return v;
+    // Swiss format with apostrophe
+    const neg = v < 0;
+    const abs = Math.abs(v);
+    const parts = abs.toFixed(2).split('.');
+    let i = parts[0];
+    const groups = [];
+    while (i.length > 3) { groups.unshift(i.slice(-3)); i = i.slice(0, -3); }
+    groups.unshift(i);
+    return (neg ? '-' : '') + groups.join("'") + '.' + parts[1];
+}
+
+function ueberfaellig(faellig) {
+    if (!faellig) return false;
+    return faellig < today;
+}
+
+async function debLoad() {
+    const res = await fetch('/api/debitoren');
+    const data = await res.json();
+    const tbody = document.getElementById('deb-tbody');
+    const status = document.getElementById('deb-status');
+    tbody.innerHTML = '';
+
+    const eintraege = data.eintraege || [];
+    if (eintraege.length === 0) {
+        status.textContent = 'Keine offenen Ausgangsrechnungen.';
+        return;
+    }
+
+    const offen = eintraege.filter(e => e.status === 'Offen');
+    const abgeschrieben = eintraege.filter(e => e.status === 'Abgeschrieben');
+
+    let statusText = `${offen.length} offen`;
+    if (abgeschrieben.length) statusText += `, ${abgeschrieben.length} abgeschrieben`;
+    status.textContent = statusText;
+
+    // Sortierung: Offen zuerst (älteste Fälligkeit oben), dann Abgeschrieben
+    const sortiert = [
+        ...offen.sort((a, b) => (a.faellig || '').localeCompare(b.faellig || '')),
+        ...abgeschrieben,
+    ];
+
+    sortiert.forEach(e => {
+        const istOffen = e.status === 'Offen';
+        const istUeberfaellig = istOffen && ueberfaellig(e.faellig);
+        const tr = document.createElement('tr');
+        if (!istOffen) tr.style.opacity = '0.5';
+
+        const faelligCell = istUeberfaellig
+            ? `<td style="color:var(--red); font-weight:600">${escapeHtml(e.faellig)} !</td>`
+            : `<td>${escapeHtml(e.faellig)}</td>`;
+
+        const statusBadge = istOffen
+            ? `<span class="badge badge-red">Offen</span>`
+            : `<span class="badge" style="background:var(--text-muted); color:#fff">Abgeschrieben</span>`;
+
+        const aktionCell = istOffen
+            ? `<button class="btn btn-sm btn-danger" onclick="debAbschreiben('${escapeHtml(e.harvest_id)}', '${escapeHtml(e.kunde)}', ${e.betrag}, '${escapeHtml(e.waehrung)}')">Abschreiben</button>`
+            : `<span style="color:var(--text-muted); font-size:0.8rem">—</span>`;
+
+        tr.innerHTML = `
+            <td style="font-weight:500">${escapeHtml(e.kunde)}</td>
+            <td>${escapeHtml(e.rechnungsdatum)}</td>
+            ${faelligCell}
+            <td style="max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title="${escapeHtml(e.betreff)}">${escapeHtml(e.betreff)}</td>
+            <td style="text-align:right; font-variant-numeric:tabular-nums">${formatBetrag(e.betrag)}</td>
+            <td>${escapeHtml(e.waehrung)}</td>
+            <td>${statusBadge}</td>
+            <td>${aktionCell}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function debAbschreiben(harvestId, kunde, betrag, waehrung) {
+    debCurrentId = harvestId;
+    document.getElementById('deb-modal-info').textContent =
+        `${kunde} · ${waehrung} ${formatBetrag(betrag)}`;
+    document.getElementById('deb-modal-notiz').value = '';
+    document.getElementById('deb-modal').style.display = 'flex';
+}
+
+function debModalClose() {
+    document.getElementById('deb-modal').style.display = 'none';
+    debCurrentId = null;
+}
+
+async function debModalConfirm() {
+    const notiz = document.getElementById('deb-modal-notiz').value.trim();
+    const res = await fetch(`/api/debitoren/${encodeURIComponent(debCurrentId)}/abschreiben`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({notiz}),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert('Fehler: ' + (err.error || res.statusText));
+        return;
+    }
+    debModalClose();
+    debLoad();
+}
+
+// Getharvest CSV Import
+document.addEventListener('DOMContentLoaded', () => {
+    debLoad();
+    document.getElementById('harvest-csv-input').addEventListener('change', harvestImport);
+});
+
+async function harvestImport(e) {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const terminal = document.getElementById('import-terminal');
+    terminal.style.display = 'block';
+    terminal.textContent = `Lade hoch: ${file.name} …`;
+
+    // CSV in _Inbox hochladen
+    const fd = new FormData();
+    fd.append('file', file, file.name);
+    const upRes = await fetch('/api/upload-csv-inbox', {method: 'POST', body: fd});
+    if (!upRes.ok) {
+        terminal.textContent = 'Upload fehlgeschlagen.';
+        return;
+    }
+
+    terminal.textContent = 'Import laeuft …';
+    const taskRes = await fetch('/api/reconciliation/debitoren', {method: 'POST',
+        headers: {'Content-Type': 'application/json'}});
+    if (!taskRes.ok) {
+        terminal.textContent = 'Import-Start fehlgeschlagen.';
+        return;
+    }
+    const {task_id} = await taskRes.json();
+
+    // Auf Task warten
+    let done = false;
+    while (!done) {
+        await new Promise(r => setTimeout(r, 800));
+        const t = await fetch(`/api/task/${task_id}`).then(r => r.json());
+        terminal.textContent = t.output.join('\n') || 'Laeuft …';
+        if (t.status === 'done' || t.status === 'error') done = true;
+    }
+    debLoad();
+}
+</script>
+{% endblock %}

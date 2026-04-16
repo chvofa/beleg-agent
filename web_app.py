@@ -436,7 +436,9 @@ def _dashboard_stats() -> dict:
     )
     pruefen = sum(1 for f in inbox if f["is_pruefen"])
     duplikate = sum(1 for f in inbox if f["is_duplikat"])
+    import abgleich_debitoren
     offene_posten_count = op_mod.count_offen()
+    debitoren_offen = abgleich_debitoren.count_offen()
 
     # Formatierte Beträge für letzte Belege
     letzte = protokoll[-10:][::-1] if protokoll else []
@@ -462,6 +464,7 @@ def _dashboard_stats() -> dict:
         "duplikat_count": duplikate,
         "inbox_count": len(inbox),
         "offene_posten_count": offene_posten_count,
+        "debitoren_offen": debitoren_offen,
         "letzte_belege": letzte,
         "letzter_upload": letzter_upload,
         "letzter_abgleich": letzter_abgleich,
@@ -511,6 +514,11 @@ def review_page():
 @app.route("/offene-posten")
 def offene_posten_page():
     return render_template("offene_posten.html")
+
+
+@app.route("/debitoren")
+def debitoren_page():
+    return render_template("debitoren.html")
 
 
 @app.route("/logs")
@@ -742,6 +750,23 @@ def api_reconciliation_upload():
     return jsonify({"ok": True, "file": f.filename})
 
 
+@app.route("/api/upload-csv-inbox", methods=["POST"])
+def api_upload_csv_inbox():
+    """Lädt eine CSV direkt in die Inbox (für Getharvest-Import)."""
+    if "file" not in request.files:
+        return jsonify({"error": "Keine Datei"}), 400
+    f = request.files["file"]
+    if not f.filename or not f.filename.lower().endswith(".csv"):
+        return jsonify({"error": "Nur CSV-Dateien"}), 400
+    safe_name = secure_filename(f.filename)
+    if not safe_name:
+        return jsonify({"error": "Ungültiger Dateiname"}), 400
+    os.makedirs(config.INBOX_PFAD, exist_ok=True)
+    ziel = os.path.join(config.INBOX_PFAD, safe_name)
+    f.save(ziel)
+    return jsonify({"ok": True, "file": safe_name})
+
+
 @app.route("/api/reconciliation/kk", methods=["POST"])
 def api_reconciliation_kk():
     import abgleich
@@ -853,6 +878,33 @@ def api_offene_posten_ignorieren(row_idx):
 def api_offene_posten_count():
     import offene_posten
     return jsonify({"count": offene_posten.count_offen()})
+
+
+# ── Debitoren ─────────────────────────────────────────────────────────────
+
+@app.route("/api/debitoren")
+def api_debitoren_list():
+    import abgleich_debitoren
+    eintraege = abgleich_debitoren.list_aktiv_standalone()
+    return jsonify({"eintraege": eintraege})
+
+
+@app.route("/api/debitoren/<harvest_id>/abschreiben", methods=["POST"])
+def api_debitoren_abschreiben(harvest_id):
+    import abgleich_debitoren
+    data = request.get_json() or {}
+    notiz = str(data.get("notiz", "")).strip()
+    ok = abgleich_debitoren.abschreiben_standalone(harvest_id, notiz)
+    if not ok:
+        return jsonify({"error": "Eintrag nicht gefunden oder nicht offen"}), 404
+    return jsonify({"ok": True})
+
+
+@app.route("/api/reconciliation/debitoren", methods=["POST"])
+def api_reconciliation_debitoren():
+    import abgleich_debitoren
+    task_id = task_manager.run_task("debitoren_import", abgleich_debitoren.main)
+    return jsonify({"ok": True, "task_id": task_id})
 
 
 # ── Logs ──────────────────────────────────────────────────────────────────

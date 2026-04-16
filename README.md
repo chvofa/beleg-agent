@@ -134,6 +134,8 @@ Das Web-Interface laeuft unter `http://localhost:5001` und bietet alle Funktione
 | **Upload** | Drag & Drop fuer PDF/JPG/PNG direkt in die Inbox |
 | **Protokoll** | Alle Belege als Tabelle mit Filtern, Sortierung, Volltextsuche, Excel/CSV-Export. Klick auf das Dokument-Icon oeffnet den Beleg direkt. |
 | **Abgleich** | KK/Bank-Abgleich und Dauerauftraege starten, CSV hochladen, Live-Output |
+| **Offene Posten** | Bank/KK-Transaktionen ohne Beleg: Beleg hochladen oder als "Kein Beleg noetig" abschliessen |
+| **Debitoren** | Offene Ausgangsrechnungen aus Getharvest: Import, Abschreiben, automatische Bereinigung der Offene Posten |
 | **Pruefung** | [PRUEFEN]-Dateien korrigieren und freigeben oder ablehnen |
 | **Logs** | Live-Log-Viewer |
 | **Einstellungen** | Pfade, Bank-Profil, Schwellenwerte, API Key aendern |
@@ -218,7 +220,33 @@ AWS - USD 150.00 KK CHF.pdf
 - Eintrag im Excel als Typ "Dauerauftrag" mit "Abgeglichen = Ja"
 - Bereits erfasste Dateien werden uebersprungen
 
-### 5. Excel-Protokoll
+### 5. Debitoren (Ausgangsrechnungen)
+
+**Was tun:** Monatlich den Getharvest-Rechnungsexport (`harvest_invoice_report.csv`) in die `_Inbox` legen – oder direkt im Web-Interface unter "Debitoren" hochladen.
+
+**Starten:** Im Web-Interface unter "Debitoren" > "Getharvest CSV importieren" oder via Terminal: `python abgleich_debitoren.py`
+
+**Was passiert:**
+- Alle offenen Rechnungen (Balance > 0) werden als "Offen" im Sheet "Debitoren" erfasst
+- Rechnungen die seit dem letzten Import bezahlt wurden (Balance = 0) werden auf "Bezahlt" aktualisiert
+- Kuerzlich bezahlte Rechnungen (letzte 12 Monate) werden ebenfalls aufgenommen, damit die Kundennamen fuer die automatische Bereinigung bekannt sind
+- **Automatische Bereinigung:** Bank-Gutschriften von bekannten Kunden verschwinden automatisch aus den "Offene Posten" (werden als "Debitorenzahlung" markiert)
+- Sehr alte bereits bezahlte Rechnungen (>12 Monate) werden uebersprungen
+- Die verarbeitete CSV wird nach `_Abgleich/` verschoben
+
+**Abschreiben:** Forderungen die uneinbringlich sind (Zahlungsausfall) koennen im Web-Interface als "Abgeschrieben" markiert werden. Sie bleiben im Sheet als Audit-Spur sichtbar, zaehlen aber nicht mehr als offen.
+
+**Monatlicher Workflow:**
+```
+1. Getharvest: Reports → Invoice Reports → CSV exportieren
+2. Datei als harvest_invoice_report.csv in _Inbox legen
+3. Web-Interface: Debitoren > "Getharvest CSV importieren"
+   → neue offene Rechnungen erscheinen
+   → bezahlte Rechnungen verschwinden
+   → Kundenzahlungen auf dem Bankkonto verschwinden aus Offene Posten
+```
+
+### 6. Excel-Protokoll
 
 Die Datei `Belege_Protokoll.xlsx` ist die zentrale Uebersicht. Spaltenreihenfolge: Kerndaten, Finanzen, Abgleich, Bemerkungen, Metadaten.
 
@@ -242,7 +270,7 @@ Die Datei `Belege_Protokoll.xlsx` ist die zentrale Uebersicht. Spaltenreihenfolg
 
 Bestehende Excel-Dateien mit alter Spaltenreihenfolge werden beim Start automatisch migriert (Backup wird erstellt).
 
-### 6. Erinnerungen
+### 7. Erinnerungen
 
 Der Agent prueft alle 6 Stunden automatisch:
 - Wie lange kein Beleg abgelegt wurde (Warnung nach 14/30 Tagen)
@@ -364,6 +392,7 @@ beleg-agent/
   bank_profile.py         # Bank-Profile (UBS, Raiffeisen, PostFinance)
   abgleich.py             # Kreditkarten-Abgleich
   abgleich_bank.py        # Bank-Abgleich
+  abgleich_debitoren.py   # Debitoren-Abgleich (Getharvest-Import)
   dauerauftraege.py       # Dauerauftraege erfassen
   setup_beleg_agent.py    # Interaktives Setup
   templates/              # Jinja2-Templates (Dashboard, Upload, etc.)
