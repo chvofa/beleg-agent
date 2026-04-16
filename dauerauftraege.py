@@ -71,7 +71,7 @@ def main():
 
         rs = daten.get("rechnungssteller", "?")
         betrag = daten.get("betrag", 0)
-        waehrung = daten.get("waehrung", "CHF")
+        waehrung = daten.get("waehrung") or "CHF"
         datum = daten.get("rechnungsdatum", "")
         conf = daten.get("gesamt_confidence", 0)
 
