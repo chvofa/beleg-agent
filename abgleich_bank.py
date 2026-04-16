@@ -597,6 +597,15 @@ def main():
     print(f"    davon schon offen:   {gesamt_bereits_offen}")
     print(f"    davon ignoriert:     {gesamt_bereits_ignoriert}")
 
+    # Kundenzahlungen (Debitoren) aus Offene Posten bereinigen
+    try:
+        import abgleich_debitoren
+        deb_bereinigt = abgleich_debitoren.bereinige_offene_posten()
+        if deb_bereinigt > 0:
+            print(f"  Debitorenzahlungen:    {deb_bereinigt}  (aus Offene Posten entfernt)")
+    except Exception:
+        pass
+
 
 if __name__ == "__main__":
     main()
