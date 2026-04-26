@@ -1,0 +1,6 @@
+- [user_setup](user_setup.md) — Fabios Setup: UBS, OneDrive, macOS/Windows gemischt, Python-Venv
+- [feedback_memory_vs_code](feedback_memory_vs_code.md) — Produkt-Entscheidungen in Code/Config, nicht in Memory
+- [feedback_restart_after_edit](feedback_restart_after_edit.md) — Tray nach Python-Aenderung immer neu starten, sonst alter Cache
+- [project_abgleich_entscheidungen](project_abgleich_entscheidungen.md) — Warum Matcher/Cleanup so tickt: Rolling-Export, 120-Tage-Fenster, Daueraufträge, Sammelauftrag
+- [project_offene_themen](project_offene_themen.md) — Was Fabio erwaehnt hat und noch nicht entschieden/umgesetzt ist (Sunrise/Salt/YouTube als Dauerauftrag, Parkingpay-Test, HSG Alumni Duplikat)
+- [project_debitoren](project_debitoren.md) — Debitoren-Modul: Getharvest-Import, Bereinigung, Abschreiben — wie es funktioniert und aktueller Stand
