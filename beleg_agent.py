@@ -551,11 +551,15 @@ def _baue_protokoll_zeile(daten: dict, original_name: str, ablagepfad: str,
     ]
 
 
+_SAMMELBELEG_SPLIT_NAMEN = {"parkingpay"}
+
+
 def schreibe_protokoll(daten: dict, original_name: str, ablagepfad: str):
     """Fügt einen neuen Eintrag ins Excel-Protokoll ein.
 
-    Bei Sammelbelegen (ist_sammelbeleg=True) werden N Zeilen geschrieben,
-    eine pro Einzelposten, alle mit demselben Ablagepfad.
+    Sammelbelege werden nur bei Parkingpay in Einzelposten gesplittet.
+    Alle anderen Sammelbelege (SBB, etc.) werden als ein Eintrag mit
+    Gesamtbetrag geschrieben.
     """
     erstelle_excel_wenn_noetig()
 
@@ -566,9 +570,11 @@ def schreibe_protokoll(daten: dict, original_name: str, ablagepfad: str):
 
             ist_sammel = bool(daten.get("ist_sammelbeleg"))
             einzelposten = daten.get("einzelposten") or []
+            rs = str(daten.get("rechnungssteller") or "").lower().strip()
+            soll_splitten = any(n in rs for n in _SAMMELBELEG_SPLIT_NAMEN)
 
-            if ist_sammel and einzelposten:
-                # N Zeilen, eine pro Einzelposten, alle mit dem gleichen Ablagepfad
+            if ist_sammel and einzelposten and soll_splitten:
+                # Parkingpay: N Zeilen, eine pro Einzelposten
                 n = 0
                 for pos in einzelposten:
                     try:
@@ -586,7 +592,7 @@ def schreibe_protokoll(daten: dict, original_name: str, ablagepfad: str):
                     )
                     ws.append(zeile)
                     n += 1
-                log.info(f"Sammelbeleg: {n} Einzelposten ins Protokoll geschrieben")
+                log.info(f"Sammelbeleg gesplittet: {n} Einzelposten ins Protokoll geschrieben")
             else:
                 # Normale Einzelrechnung
                 zeile = _baue_protokoll_zeile(

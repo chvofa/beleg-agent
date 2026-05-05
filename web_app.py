@@ -346,7 +346,10 @@ def _lade_protokoll() -> list[dict]:
         return []
     rows = []
     with config.excel_lock():
-        wb = openpyxl.load_workbook(config.EXCEL_PROTOKOLL, read_only=True)
+        try:
+            wb = openpyxl.load_workbook(config.EXCEL_PROTOKOLL, read_only=True)
+        except (zipfile.BadZipFile, OSError):
+            return []
         ws = wb.active
         for row in ws.iter_rows(min_row=2, values_only=True):
             entry = {}

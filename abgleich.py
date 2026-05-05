@@ -30,9 +30,12 @@ def _get_col(row: dict, namen: list[str]) -> str:
             return row[n].strip() if row[n] else ""
     # Fallback: fuzzy match auf Spaltennamen
     for key in row:
+        if not isinstance(key, str):
+            continue
         for n in namen:
             if n.lower() in key.lower() or key.lower() in n.lower():
-                return row[key].strip() if row[key] else ""
+                val = row[key]
+                return val.strip() if isinstance(val, str) else ""
     return ""
 
 
