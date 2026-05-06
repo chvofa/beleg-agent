@@ -76,7 +76,7 @@ def toast(title, msg, icon_path=None):
 # ── API-Key Verwaltung ────────────────────────────────────────────────────
 
 def get_api_key_from_env():
-    """Liest ANTHROPIC_API_KEY mit OS-spezifischer Methode."""
+    """Liest ANTHROPIC_API_KEY aus Umgebung (macOS: via direnv/.envrc, Windows: Registry)."""
     if IS_WINDOWS:
         try:
             result = subprocess.run(
@@ -90,24 +90,7 @@ def get_api_key_from_env():
                 return key
         except Exception:
             pass
-    # Prozess-Umgebung
-    key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if key:
-        return key
-    # macOS-Fallback: LaunchAgents lesen ~/.zshrc nicht, Key direkt parsen
-    if IS_MAC:
-        try:
-            import re
-            zshrc = os.path.expanduser("~/.zshrc")
-            if os.path.exists(zshrc):
-                with open(zshrc, "r") as f:
-                    for line in f:
-                        m = re.match(r'^export\s+ANTHROPIC_API_KEY=["\']?([^"\'\s]+)', line)
-                        if m:
-                            return m.group(1)
-        except Exception:
-            pass
-    return ""
+    return os.environ.get("ANTHROPIC_API_KEY", "")
 
 
 def set_api_key_in_env(api_key):
@@ -125,21 +108,8 @@ def set_api_key_in_env(api_key):
         except Exception:
             pass
     elif IS_MAC:
-        try:
-            zshrc = os.path.expanduser("~/.zshrc")
-            marker = "# Beleg-Agent API Key"
-            line = f'export ANTHROPIC_API_KEY="{api_key}"  {marker}'
-            # Alten Eintrag entfernen falls vorhanden
-            if os.path.exists(zshrc):
-                with open(zshrc, "r") as f:
-                    lines = [l for l in f.readlines() if marker not in l]
-                with open(zshrc, "w") as f:
-                    f.writelines(lines)
-            with open(zshrc, "a") as f:
-                f.write(f"\n{line}\n")
-            os.environ["ANTHROPIC_API_KEY"] = api_key
-            return "API Key in ~/.zshrc gespeichert. Neues Terminal oeffnen fuer Wirkung."
-        except Exception:
-            pass
+        os.environ["ANTHROPIC_API_KEY"] = api_key
+        return ("API Key fuer diese Sitzung gesetzt. "
+                "Fuer persistente Speicherung: Bitwarden-Item beleg_agent/ANTHROPIC_API_KEY anlegen.")
     os.environ["ANTHROPIC_API_KEY"] = api_key
     return "API Key in Prozess-Umgebung gesetzt (nicht persistent)."
