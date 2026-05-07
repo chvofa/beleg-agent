@@ -37,7 +37,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         files.map(f => `<tr>
             <td>${f.name}</td>
             <td>${f.size > 1024 ? (f.size/1024).toFixed(0) + ' KB' : f.size + ' B'}</td>
-            <td>${f.modified}</td>
+            <td>${fmtDate(f.modified)}</td>
             <td>${f.is_pruefen ? '<span class="badge badge-yellow">Pruefen</span>' :
                   f.is_duplikat ? '<span class="badge badge-red">Duplikat</span>' :
                   '<span class="badge badge-green">Neu</span>'}</td>

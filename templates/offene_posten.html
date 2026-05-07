@@ -92,11 +92,11 @@ async function opLoad() {
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td>${escapeHtml(p.quelle)}</td>
-            <td>${escapeHtml(p.datum)}</td>
+            <td>${fmtDate(p.datum)}</td>
             <td style="text-align:right; font-variant-numeric:tabular-nums">${formatBetrag(p.betrag)}</td>
             <td>${escapeHtml(p.waehrung)}</td>
             <td style="max-width:400px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title="${escapeHtml(p.text)}">${escapeHtml(p.text)}</td>
-            <td style="color:var(--text-muted); font-size:0.8rem">${escapeHtml(p.erfasst_am)}</td>
+            <td style="color:var(--text-muted); font-size:0.8rem">${fmtDate(p.erfasst_am)}</td>
             <td>
                 <button class="btn btn-sm btn-primary" onclick="opUpload(${p.row})">Beleg hochladen</button>
                 <button class="btn btn-sm" onclick="opIgnore(${p.row}, '${escapeAttr(p.quelle)}', '${escapeAttr(p.datum)}', ${p.betrag}, '${escapeAttr(p.waehrung)}')">Kein Beleg</button>

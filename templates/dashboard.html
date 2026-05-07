@@ -45,10 +45,10 @@
 
 <div class="stats-meta">
     {% if stats.letzter_upload %}
-    <span>Letzter Upload: <strong>{{ stats.letzter_upload }}</strong></span>
+    <span>Letzter Upload: <strong>{{ stats.letzter_upload|datefmt }}</strong></span>
     {% endif %}
     {% if stats.letzter_abgleich %}
-    <span>Letzter Abgleich: <strong>{{ stats.letzter_abgleich }}</strong></span>
+    <span>Letzter Abgleich: <strong>{{ stats.letzter_abgleich|datefmt }}</strong></span>
     {% endif %}
 </div>
 
@@ -84,7 +84,7 @@
             <tbody>
                 {% for b in stats.letzte_belege %}
                 <tr>
-                    <td>{{ b.Datum_Rechnung }}</td>
+                    <td>{{ b.Datum_Rechnung|datefmt }}</td>
                     <td>{{ b.Rechnungssteller }}</td>
                     <td>{{ b.Typ }}</td>
                     <td style="text-align:right; font-variant-numeric:tabular-nums">

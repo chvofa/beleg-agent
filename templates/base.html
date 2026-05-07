@@ -7,48 +7,48 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <aside class="sidebar">
-        <div class="sidebar-logo">
-            <span class="dot {% if status is defined %}{{ status.get('health', 'red') }}{% endif %}" id="status-dot"></span>
-            <span>Beleg-Agent</span>
+    <header class="topnav">
+        <div class="topnav-inner">
+            <div class="topnav-left">
+                <a href="/dashboard" class="topnav-brand">
+                    <img src="{{ url_for('static', filename='meocon-logo-horizontal-black.png') }}" alt="Meocon" class="topnav-logo">
+                    <span class="topnav-divider"></span>
+                    <span class="topnav-appname">Beleg-Agent</span>
+                    <span class="dot {% if status is defined %}{{ status.get('health', 'red') }}{% endif %}" id="status-dot"></span>
+                </a>
+            </div>
+            <nav class="topnav-links">
+                <a href="/dashboard" class="{% if request.path == '/dashboard' %}active{% endif %}">Dashboard</a>
+                <a href="/upload" class="{% if request.path == '/upload' %}active{% endif %}">Upload</a>
+                <a href="/protocol" class="{% if request.path == '/protocol' %}active{% endif %}">Protokoll</a>
+                <a href="/reconciliation" class="{% if request.path == '/reconciliation' %}active{% endif %}">Abgleich</a>
+                <a href="/offene-posten" class="{% if request.path == '/offene-posten' %}active{% endif %}">Offene Posten</a>
+                <a href="/debitoren" class="{% if request.path == '/debitoren' %}active{% endif %}">Debitoren</a>
+                <a href="/review" class="{% if request.path == '/review' %}active{% endif %}">Prüfung</a>
+                <span class="nav-sep"></span>
+                <a href="/logs" class="nav-secondary {% if request.path == '/logs' %}active{% endif %}">Logs</a>
+                <a href="/settings" class="nav-secondary {% if request.path == '/settings' %}active{% endif %}">Einstellungen</a>
+            </nav>
+            <button class="topnav-mobile-toggle" id="mobile-menu-toggle" aria-label="Menu">
+                <span></span><span></span><span></span>
+            </button>
         </div>
-        <nav>
-            <a href="/dashboard" class="{% if request.path == '/dashboard' %}active{% endif %}">
-                <span>Dashboard</span>
-            </a>
-            <a href="/upload" class="{% if request.path == '/upload' %}active{% endif %}">
-                <span>Upload</span>
-            </a>
-            <a href="/protocol" class="{% if request.path == '/protocol' %}active{% endif %}">
-                <span>Protokoll</span>
-            </a>
-            <a href="/reconciliation" class="{% if request.path == '/reconciliation' %}active{% endif %}">
-                <span>Abgleich</span>
-            </a>
-            <a href="/offene-posten" class="{% if request.path == '/offene-posten' %}active{% endif %}">
-                <span>Offene Posten</span>
-            </a>
-            <a href="/debitoren" class="{% if request.path == '/debitoren' %}active{% endif %}">
-                <span>Debitoren</span>
-            </a>
-            <a href="/review" class="{% if request.path == '/review' %}active{% endif %}">
-                <span>Prüfung</span>
-            </a>
-            <div class="sep"></div>
-            <a href="/logs" class="{% if request.path == '/logs' %}active{% endif %}">
-                <span>Logs</span>
-            </a>
-            <a href="/settings" class="{% if request.path == '/settings' %}active{% endif %}">
-                <span>Einstellungen</span>
-            </a>
-        </nav>
-    </aside>
+    </header>
 
     <main class="main">
         {% block content %}{% endblock %}
     </main>
 
     <script src="{{ url_for('static', filename='app.js') }}"></script>
+    <script>
+        const toggle = document.getElementById('mobile-menu-toggle');
+        if (toggle) {
+            toggle.addEventListener('click', () => {
+                document.querySelector('.topnav-links').classList.toggle('open');
+                toggle.classList.toggle('open');
+            });
+        }
+    </script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

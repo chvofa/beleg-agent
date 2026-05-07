@@ -123,8 +123,8 @@ async function debLoad() {
         if (!istOffen) tr.style.opacity = '0.5';
 
         const faelligCell = istUeberfaellig
-            ? `<td style="color:var(--red); font-weight:600">${escapeHtml(e.faellig)} !</td>`
-            : `<td>${escapeHtml(e.faellig)}</td>`;
+            ? `<td style="color:var(--red); font-weight:600">${fmtDate(e.faellig)} !</td>`
+            : `<td>${fmtDate(e.faellig)}</td>`;
 
         const statusBadge = istOffen
             ? `<span class="badge badge-red">Offen</span>`
@@ -136,7 +136,7 @@ async function debLoad() {
 
         tr.innerHTML = `
             <td style="font-weight:500">${escapeHtml(e.kunde)}</td>
-            <td>${escapeHtml(e.rechnungsdatum)}</td>
+            <td>${fmtDate(e.rechnungsdatum)}</td>
             ${faelligCell}
             <td style="max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title="${escapeHtml(e.betreff)}">${escapeHtml(e.betreff)}</td>
             <td style="text-align:right; font-variant-numeric:tabular-nums">${formatBetrag(e.betrag)}</td>

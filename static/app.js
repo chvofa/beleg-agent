@@ -1,5 +1,11 @@
 /* ── Beleg-Agent Web UI – Client-Side JS ──────────────────────────────── */
 
+function fmtDate(v) {
+    if (!v) return '';
+    const m = v.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? m[3] + '.' + m[2] + '.' + m[1] + v.slice(10) : v;
+}
+
 // ── SSE Connection ──────────────────────────────────────────────────────
 
 let eventSource = null;
@@ -212,8 +218,8 @@ function renderProtocol(rows) {
             : `<span class="beleg-icon muted" title="Keine Datei">&#128196;</span>`;
         return `<tr>
             <td style="text-align:center; padding:0.4rem">${icon}</td>
-            <td>${row.Datum_Rechnung || ''}</td>
-            <td class="cell-muted">${row.Valutadatum || ''}</td>
+            <td>${fmtDate(row.Datum_Rechnung)}</td>
+            <td class="cell-muted">${fmtDate(row.Valutadatum)}</td>
             <td>${row.Rechnungssteller || ''}</td>
             <td>${row.Typ || ''}</td>
             <td style="text-align:right; font-variant-numeric:tabular-nums">${formatBetrag(row.Betrag, row.Währung)}</td>

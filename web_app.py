@@ -36,6 +36,17 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
 
 
+@app.template_filter("datefmt")
+def _jinja_datefmt(value):
+    """YYYY-MM-DD -> DD.MM.YYYY, lässt anderes unverändert."""
+    if not value or not isinstance(value, str):
+        return value or ""
+    parts = value.split("-")
+    if len(parts) == 3 and len(parts[0]) == 4:
+        return f"{parts[2]}.{parts[1]}.{parts[0]}"
+    return value
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  Sicherheit
 # ═══════════════════════════════════════════════════════════════════════════

@@ -22,6 +22,7 @@ DOKUMENTATION.txt
 *.jpg
 *.jpeg
 *.png
+!static/meocon-logo-*.png
 *.csv
 
 # ── Umgebung / IDE ────────────────────────────────────────────────────────
