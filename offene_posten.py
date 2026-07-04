@@ -15,6 +15,7 @@ import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill
 
 import config
+import kontierung
 
 
 SHEET_NAME = "Offene_Posten"
@@ -29,6 +30,7 @@ SPALTEN = [
     "Grund",           # 7  nur wenn Status=Ignoriert
     "Erfasst_am",      # 8  YYYY-MM-DD HH:MM (erste Erfassung)
     "Entschieden_am",  # 9  YYYY-MM-DD HH:MM (bei Ignoriert)
+    "Konto_Vorschlag", # 10 Provisorische Kontierung aus Kontoblatt-Historie
 ]
 
 COL_QUELLE = 1
@@ -40,6 +42,7 @@ COL_STATUS = 6
 COL_GRUND = 7
 COL_ERFASST = 8
 COL_ENTSCHIEDEN = 9
+COL_KONTO = 10
 
 # Gueltige Gruende fuer "Kein Beleg noetig" (Dropdown im UI)
 GRUENDE = [
@@ -75,7 +78,7 @@ def ensure_sheet(wb: openpyxl.Workbook):
         zelle.fill = header_fill
         zelle.alignment = Alignment(horizontal="center")
 
-    breiten = {1: 12, 2: 12, 3: 12, 4: 10, 5: 50, 6: 12, 7: 14, 8: 18, 9: 18}
+    breiten = {1: 12, 2: 12, 3: 12, 4: 10, 5: 50, 6: 12, 7: 14, 8: 18, 9: 18, 10: 24}
     for i, b in breiten.items():
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = b
 
@@ -94,6 +97,7 @@ def _row_to_dict(ws, row_idx: int) -> dict:
         "grund": str(ws.cell(row=row_idx, column=COL_GRUND).value or "").strip(),
         "erfasst_am": str(ws.cell(row=row_idx, column=COL_ERFASST).value or "").strip(),
         "entschieden_am": str(ws.cell(row=row_idx, column=COL_ENTSCHIEDEN).value or "").strip(),
+        "konto_vorschlag": str(ws.cell(row=row_idx, column=COL_KONTO).value or "").strip(),
     }
 
 
@@ -172,6 +176,7 @@ def upsert(ws, quelle: str, datum, betrag: float, waehrung: str, text: str) -> s
         "",
         now,
         "",
+        kontierung.vorschlag_fuer(t_norm),
     ])
     return "neu"
 

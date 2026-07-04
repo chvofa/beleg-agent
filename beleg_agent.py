@@ -15,6 +15,7 @@ import re
 import shutil
 import sys
 import time
+import zipfile
 from datetime import datetime, date
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 import config
+import kontierung
 import platform_utils
 
 # ── Toast Icon ────────────────────────────────────────────────────────────
@@ -127,6 +129,39 @@ def datei_zu_bilder_base64(dateipfad: str) -> list[tuple[str, str]]:
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         return [(base64.standard_b64encode(buf.getvalue()).decode("utf-8"), "image/png")]
+
+
+class ClaudeAPIFehler(Exception):
+    """Claude-API-Aufruf fehlgeschlagen. `kurz` ist eine knappe, diagnostische
+    Ursache fuer Toast/Log — statt pauschal 'API nicht erreichbar'."""
+
+    def __init__(self, kurz: str):
+        self.kurz = kurz
+        super().__init__(kurz)
+
+
+def claude_fehler_text(e) -> str:
+    """Mappt einen anthropic.APIError auf eine knappe deutsche Ursache.
+
+    Schluesselt rein ueber den HTTP-Status: Verbindungs-/Timeout-Fehler
+    (anthropic.APIConnectionError) haben kein .status_code -> echtes
+    'nicht erreichbar'. Alles mit Status ist eine API-Antwort (404 totes
+    Modell, 401 Key, 429 Limit ...), NICHT ein Erreichbarkeitsproblem.
+    """
+    status = getattr(e, "status_code", None)
+    if status is None:
+        return "API nicht erreichbar (Netzwerk/Verbindung)."
+    if status == 404:
+        return "Modell nicht gefunden (404) – ANTHROPIC_MODEL in config.py veraltet?"
+    if status == 401:
+        return "API-Key ungültig (401) – Key im Keychain prüfen."
+    if status == 403:
+        return "Zugriff verweigert (403) – Key-Rechte/Guthaben prüfen."
+    if status == 429:
+        return "Rate-Limit erreicht (429) – später erneut versuchen."
+    if status >= 500:
+        return f"Anthropic-Serverfehler ({status}) – später erneut."
+    return f"Claude-API-Fehler ({status})."
 
 
 def extrahiere_rechnungsdaten(dateipfad: str) -> dict | None:
@@ -246,7 +281,7 @@ Regeln:
         )
     except anthropic.APIError as e:
         log.error(f"Claude API-Fehler: {e}")
-        return None
+        raise ClaudeAPIFehler(claude_fehler_text(e)) from e
 
     # JSON aus Antwort parsen
     antwort_text = response.content[0].text.strip()
@@ -285,6 +320,12 @@ Regeln:
         if pp_hist is not None and not daten.get("ist_paypal"):
             daten["ist_paypal"] = pp_hist
 
+    # Provisorische Kontierung aus Kontoblatt-Historie (rein informativ,
+    # beeinflusst weder Confidence noch Routing)
+    daten["konto_vorschlag"] = kontierung.vorschlag_fuer(daten.get("rechnungssteller", ""))
+    if daten["konto_vorschlag"]:
+        log.info(f"Konto-Vorschlag aus Historie: {daten['konto_vorschlag']}")
+
     return daten
 
 
@@ -294,7 +335,7 @@ def lookup_zahlungsart(rechnungssteller: str) -> tuple[str, bool | None]:
         return "", None
 
     try:
-        wb = openpyxl.load_workbook(config.EXCEL_PROTOKOLL, read_only=True)
+        wb = config.load_protokoll(read_only=True)
         ws = wb.active
     except Exception:
         return "", None
@@ -362,7 +403,7 @@ def pruefe_duplikat_protokoll(daten: dict) -> bool:
         return False
 
     try:
-        wb = openpyxl.load_workbook(config.EXCEL_PROTOKOLL)
+        wb = config.load_protokoll()
         ws = wb.active
     except Exception:
         return False
@@ -413,9 +454,9 @@ def migriere_excel_spalten():
     try:
         with config.excel_lock():
             try:
-                wb = openpyxl.load_workbook(config.EXCEL_PROTOKOLL)
-            except PermissionError:
-                log.warning("Excel ist geöffnet — Migration übersprungen.")
+                wb = config.load_protokoll()
+            except (zipfile.BadZipFile, OSError):
+                log.warning("Excel nicht lesbar (geöffnet oder OneDrive-Sync) — Migration übersprungen.")
                 return
 
             ws = wb.active
@@ -484,7 +525,8 @@ def migriere_excel_spalten():
 
             # Spaltenbreiten
             breiten = {1: 14, 2: 30, 3: 12, 4: 12, 5: 10, 6: 14, 7: 8,
-                       8: 10, 9: 14, 10: 12, 11: 40, 12: 30, 13: 80, 14: 10, 15: 20}
+                       8: 10, 9: 14, 10: 12, 11: 40, 12: 30, 13: 80, 14: 10, 15: 20,
+                       18: 24}
             for col, breite in breiten.items():
                 ws_neu.column_dimensions[openpyxl.utils.get_column_letter(col)].width = breite
 
@@ -518,7 +560,8 @@ def erstelle_excel_wenn_noetig():
 
     # Spaltenbreiten
     breiten = {1: 14, 2: 30, 3: 12, 4: 12, 5: 10, 6: 14, 7: 8,
-               8: 10, 9: 14, 10: 12, 11: 40, 12: 30, 13: 80, 14: 10, 15: 20}
+               8: 10, 9: 14, 10: 12, 11: 40, 12: 30, 13: 80, 14: 10, 15: 20,
+               18: 24}
     for i, b in breiten.items():
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = b
 
@@ -548,6 +591,7 @@ def _baue_protokoll_zeile(daten: dict, original_name: str, ablagepfad: str,
         datetime.now().strftime("%Y-%m-%d %H:%M"),        # 15 Verarbeitungsdatum
         "",                                               # 16 Valutadatum (erst beim Abgleich)
         referenz_nr,                                      # 17 Referenz_Nr
+        daten.get("konto_vorschlag", ""),                 # 18 Konto_Vorschlag
     ]
 
 
@@ -563,9 +607,13 @@ def schreibe_protokoll(daten: dict, original_name: str, ablagepfad: str):
     """
     erstelle_excel_wenn_noetig()
 
+    # Manueller Approve-Pfad (Web-UI) läuft ohne Extraktion — Lookup nachholen
+    if not daten.get("konto_vorschlag"):
+        daten["konto_vorschlag"] = kontierung.vorschlag_fuer(daten.get("rechnungssteller", ""))
+
     try:
         with config.excel_lock():
-            wb = openpyxl.load_workbook(config.EXCEL_PROTOKOLL)
+            wb = config.load_protokoll()
             ws = wb.active
 
             ist_sammel = bool(daten.get("ist_sammelbeleg"))
@@ -777,6 +825,12 @@ def lege_datei_ab(dateipfad: str, daten: dict) -> bool:
     waehrung = daten.get("waehrung", "")
     toast(f"Beleg abgelegt", f"{typ}: {rs} - {waehrung} {betrag:.2f}")
 
+    try:
+        from web_app import event_bus
+        event_bus.publish("beleg_abgelegt", {"rechnungssteller": rs})
+    except Exception:
+        pass
+
     return True
 
 
@@ -795,11 +849,17 @@ def verarbeite_datei(dateipfad: str):
     log.info(f"Verarbeite: {dateiname}")
 
     # 1. Extraktion via Claude Vision
-    daten = extrahiere_rechnungsdaten(dateipfad)
-    if daten is None:
-        log.error(f"Extraktion fehlgeschlagen für {dateiname} – Datei bleibt in Inbox.")
+    try:
+        daten = extrahiere_rechnungsdaten(dateipfad)
+    except ClaudeAPIFehler as e:
+        log.error(f"Extraktion fehlgeschlagen für {dateiname}: {e.kurz} – Datei bleibt in Inbox.")
         toast("Beleg nicht verarbeitet",
-              f"{dateiname} - API nicht erreichbar. Datei bleibt in _Inbox, Agent später neustarten.")
+              f"{dateiname} – {e.kurz} Datei bleibt in _Inbox.")
+        return
+    if daten is None:
+        log.error(f"Extraktion fehlgeschlagen für {dateiname} – Antwort unlesbar. Datei bleibt in Inbox.")
+        toast("Beleg nicht verarbeitet",
+              f"{dateiname} – Antwort von Claude nicht auswertbar (Bild/JSON). Datei bleibt in _Inbox.")
         return
 
     confidence = daten.get("gesamt_confidence", 0)

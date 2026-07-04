@@ -596,10 +596,39 @@ def agent_stop():
     return jsonify({"ok": True, "status": "stopped"})
 
 
+def _hard_restart():
+    """Echter Prozess-Neustart via os.execv: ersetzt das Prozess-Image, sodass
+    config.py und ALLE Module frisch geladen werden.
+
+    Der bisherige Soft-Restart (agent.restart() = stop+start im selben Prozess)
+    laesst sys.modules unveraendert -> Code-/Config-Aenderungen griffen NICHT
+    (am 2026-06-25 Stunden gekostet: neue Modell-ID stand in config.py, der
+    laufende Prozess sendete aber weiter die alte). os.execv behebt das,
+    behaelt os.environ (inkl. ANTHROPIC_API_KEY) und den PID; der Listen-Socket
+    schliesst durch CLOEXEC automatisch.
+    """
+    try:
+        agent.stop()
+    except Exception:
+        pass
+    python = sys.executable
+    # argv[0] = beim Start uebergebenes Skript (prod: tray_agent.py, dev: web_app.py)
+    script = os.path.abspath(sys.argv[0])
+    if not os.path.isfile(script):
+        # Fallback (z.B. via -m/stdin gestartet): tray_agent.py neben web_app.py
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tray_agent.py")
+    os.execv(python, [python, script] + sys.argv[1:])
+
+
 @app.route("/agent/restart", methods=["POST"])
 def agent_restart():
-    agent.restart()
-    return jsonify({"ok": True, "status": "running"})
+    # ECHTER Neustart (laedt config.py neu). Antwort zuerst rausschicken, dann
+    # kurz verzoegert das Image ersetzen, damit das Web-UI die Bestaetigung
+    # noch bekommt (es macht nach 1s location.reload()) und sich danach am
+    # frischen Prozess neu verbindet.
+    threading.Timer(1.5, _hard_restart).start()
+    return jsonify({"ok": True, "status": "restarting",
+                    "hinweis": "Agent wird vollständig neu gestartet …"})
 
 
 # ── Upload ────────────────────────────────────────────────────────────────

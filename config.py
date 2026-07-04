@@ -9,7 +9,10 @@ Kopiere config_local.example.py → config_local.py und passe die Pfade an.
 import os
 import sys
 import time
+import zipfile
 from contextlib import contextmanager
+
+import openpyxl
 
 try:
     from config_local import ABLAGE_STAMMPFAD
@@ -39,13 +42,18 @@ INBOX_PFAD = os.path.join(ABLAGE_STAMMPFAD, "_Inbox")
 
 EXCEL_PROTOKOLL = os.path.join(ABLAGE_STAMMPFAD, "Belege_Protokoll.xlsx")
 
+# Lieferant→Konto-Mapping aus den Treuhänder-Kontoblättern (import_kontierung.py)
+KONTIERUNG_MAPPING = os.path.join(ABLAGE_STAMMPFAD, "Kontierung_Mapping.json")
+
 LOG_DATEI = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "beleg-agent.log"
 )
 
 # ── Claude API ─────────────────────────────────────────────────────────────
-ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
-# Alternativ: "claude-opus-4-5-20250514"
+# claude-sonnet-4-20250514 (Sonnet 4) wird abgekuendigt und liefert seit
+# 2026-06-22 einen 404 not_found_error -> Drop-in-Ersatz: Sonnet 4.6.
+ANTHROPIC_MODEL = "claude-sonnet-4-6"
+# Alternativ (teurer, mehr Reasoning): "claude-opus-4-8"
 
 # ── Schwellenwerte ─────────────────────────────────────────────────────────
 CONFIDENCE_AUTO = 0.85        # Ab hier: automatische Ablage
@@ -94,6 +102,7 @@ EXCEL_SPALTEN = [
     "Verarbeitungsdatum",   # 15
     "Valutadatum",          # 16 - Tatsaechliches Buchungsdatum der Bank/KK-Transaktion (aus Abgleich)
     "Referenz_Nr",          # 17 - Transaktions-/Auftragsnummer fuer eindeutigen Abgleich
+    "Konto_Vorschlag",      # 18 - Provisorische Kontierung aus Kontoblatt-Historie, z.B. "4530 Telefon/Internet"
 ]
 
 # ── Spalten-Nummern (für Code-Referenzen) ─────────────────────────────────
@@ -114,6 +123,7 @@ COL_CONFIDENCE = 14
 COL_VERARBEITUNGSDATUM = 15
 COL_VALUTADATUM = 16
 COL_REFERENZ = 17
+COL_KONTO_VORSCHLAG = 18
 
 # ── Bank-/KK-Abgleich (für späteres Reconciliation-Feature) ──────────────
 # Pfade zu CSV-Exporten der Bank-/KK-Auszüge
@@ -156,6 +166,29 @@ def excel_lock():
             os.remove(EXCEL_LOCK)
         except OSError:
             pass
+
+
+def load_protokoll(read_only: bool = False, _versuche: int = 5, _delay: float = 0.5):
+    """Laedt das Excel-Protokoll robust gegen transiente OneDrive-Sync-Fehler.
+
+    Waehrend OneDrive Belege_Protokoll.xlsx synchronisiert, schlaegt
+    openpyxl.load_workbook sporadisch fehl mit zipfile.BadZipFile
+    ("File is not a zip file") oder OSError (z.B. [Errno 11]
+    "Resource deadlock avoided"). Diese Fehler sind transient — ein kurzer
+    Retry sitzt das Sync-Fenster aus. Nach _versuche erfolglosen Versuchen
+    wird der letzte Fehler weitergereicht (kein stilles None).
+
+    Aufrufer laden weiterhin innerhalb von excel_lock().
+    """
+    letzter_fehler = None
+    for versuch in range(_versuche):
+        try:
+            return openpyxl.load_workbook(EXCEL_PROTOKOLL, read_only=read_only)
+        except (zipfile.BadZipFile, OSError) as e:
+            letzter_fehler = e
+            if versuch < _versuche - 1:
+                time.sleep(_delay)
+    raise letzter_fehler
 
 ABGLEICH_QUELLEN = {
     "KK CHF": os.path.join(ABGLEICH_PFAD, "KK_CHF.csv"),

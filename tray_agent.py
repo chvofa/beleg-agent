@@ -153,8 +153,16 @@ class BelegTray:
             pass
 
     def monitor_loop(self):
-        """Aktualisiert das Icon basierend auf der Status-Datei."""
+        """Aktualisiert Icon basierend auf der Status-Datei,
+        Menü-KPIs nur bei tatsächlicher Verarbeitung."""
+        try:
+            from web_app import event_bus
+            eq = event_bus.subscribe()
+        except Exception:
+            eq = None
+
         while True:
+            # Icon-Farbe aktualisieren
             if os.path.exists(STATUS_DATEI):
                 try:
                     alter = time.time() - os.path.getmtime(STATUS_DATEI)
@@ -168,6 +176,20 @@ class BelegTray:
                     pass
             else:
                 self.update_icon("red")
+
+            # Menü nur aktualisieren wenn ein relevantes Event vorliegt
+            if eq and self.icon:
+                had_event = False
+                while not eq.empty():
+                    try:
+                        msg = eq.get_nowait()
+                        if msg.get("type") in ("beleg_abgelegt", "upload", "status"):
+                            had_event = True
+                    except Exception:
+                        break
+                if had_event:
+                    self.icon.update_menu()
+
             time.sleep(15)
 
     # ── KPI-Daten laden ─────────────────────────────────────────────
