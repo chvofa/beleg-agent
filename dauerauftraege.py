@@ -64,7 +64,11 @@ def main():
 
         print(f"  Verarbeite: {datei}")
 
-        daten = beleg_agent.extrahiere_rechnungsdaten(pfad)
+        try:
+            daten = beleg_agent.extrahiere_rechnungsdaten(pfad)
+        except beleg_agent.ClaudeAPIFehler as e:
+            print(f"    FEHLER: {e.kurz}")
+            continue
         if daten is None:
             print(f"    FEHLER: Konnte nicht extrahieren")
             continue

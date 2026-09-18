@@ -55,6 +55,12 @@ LOG_DATEI = os.path.join(
 ANTHROPIC_MODEL = "claude-sonnet-4-6"
 # Alternativ (teurer, mehr Reasoning): "claude-opus-4-8"
 
+# Obergrenze fuer die Antwortlaenge. Bezahlt werden nur die tatsaechlich
+# erzeugten Tokens — ein normaler Beleg braucht ~250. Frueher 1024: das
+# reichte nicht fuer die MB.CHARGE-Monatsrechnung mit 8 Einzelposten (Antwort
+# brach mitten im JSON ab). Parkingpay-Abrechnungen koennen noch laenger sein.
+ANTHROPIC_MAX_TOKENS = 8192
+
 # ── Schwellenwerte ─────────────────────────────────────────────────────────
 CONFIDENCE_AUTO = 0.85        # Ab hier: automatische Ablage
 CONFIDENCE_RÜCKFRAGE = 0.60   # Ab hier: Terminal-Rückfrage
