@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import shutil
+import stat
 import sys
 import time
 import zipfile
@@ -105,30 +106,126 @@ client = anthropic.Anthropic()  # liest ANTHROPIC_API_KEY aus Umgebung
 MAX_PDF_SEITEN = 5  # Maximal so viele Seiten an die API senden
 
 
-def datei_zu_bilder_base64(dateipfad: str) -> list[tuple[str, str]]:
-    """Konvertiert PDF (alle Seiten bis MAX) oder Bild → Liste von (base64, media_type)."""
-    endung = Path(dateipfad).suffix.lower()
+# OneDrive/iCloud-Platzhalter: Eintrag existiert, Inhalt liegt nur auf dem
+# Server. Auf Windows kennt os.stat() kein st_flags -> Konstante selbst halten.
+_SF_DATALESS = getattr(stat, "SF_DATALESS", 0x40000000)
 
-    if endung == ".pdf":
-        pdf = pdfium.PdfDocument(dateipfad)
-        anzahl = min(len(pdf), MAX_PDF_SEITEN)
-        bilder = []
-        for i in range(anzahl):
-            bitmap = pdf[i].render(scale=2)
-            pil_image = bitmap.to_pil()
-            buf = io.BytesIO()
-            pil_image.save(buf, format="PNG")
-            bilder.append((base64.standard_b64encode(buf.getvalue()).decode("utf-8"), "image/png"))
-        pdf.close()
+
+def warte_bis_datei_stabil(dateipfad: str) -> bool:
+    """Wartet, bis der Beleg fertig geschrieben ist. True = stabil.
+
+    Die _Inbox liegt in einer OneDrive-Bibliothek: watchdog meldet eine neue
+    Datei, sobald der Verzeichniseintrag existiert — der Inhalt trudelt u.U.
+    erst Sekunden spaeter ein. Das fruehere feste sleep(2) reichte dafuer
+    nicht; grosse Scan-PDFs kamen abgeschnitten bei pdfium an (Vorfaelle im
+    Log: 28.04., 29.04., 29.05., 04.06. und 31.08.2026).
+
+    Deshalb wird die Groesse gepollt, bis sie ueber DATEI_STABIL_CHECKS
+    Messungen unveraendert und groesser 0 ist. False heisst: Timeout, oder
+    die Datei ist zwischenzeitlich verschwunden.
+    """
+    ende = time.time() + config.DATEI_STABIL_TIMEOUT
+    letzte_groesse = -1
+    stabil = 0
+
+    while time.time() < ende:
+        try:
+            groesse = os.path.getsize(dateipfad)
+        except OSError:
+            return False  # verschoben oder geloescht
+
+        if groesse > 0 and groesse == letzte_groesse:
+            stabil += 1
+            if stabil >= config.DATEI_STABIL_CHECKS:
+                return True
+        else:
+            stabil = 0
+
+        letzte_groesse = groesse
+        time.sleep(config.DATEI_STABIL_INTERVALL)
+
+    log.warning(
+        f"{os.path.basename(dateipfad)} war nach {config.DATEI_STABIL_TIMEOUT}s "
+        f"noch nicht stabil — OneDrive-Sync haengt?"
+    )
+    return False
+
+
+def _lies_datei_bytes(dateipfad: str) -> bytes:
+    """Liest die Datei komplett in den Speicher — erzwingt die OneDrive-Hydration.
+
+    pdfium bekommt bewusst NICHT den Pfad: es wuerde sonst selbst oeffnen
+    (fopen/fread) und sieht bei einem Files-On-Demand-Platzhalter — der bereits
+    die finale Groesse meldet, den Inhalt aber nur auf dem Server hat — nichts
+    Brauchbares ("PDFium: File access error" bzw. "Data format error").
+    Ein Python-Read blockiert dagegen, bis der File Provider materialisiert hat.
+    """
+    try:
+        if getattr(os.stat(dateipfad), "st_flags", 0) & _SF_DATALESS:
+            log.info(
+                f"{os.path.basename(dateipfad)} liegt nur als OneDrive-Platzhalter "
+                f"vor — lade Inhalt herunter..."
+            )
+    except OSError:
+        pass  # rein diagnostisch; der Read unten meldet das echte Problem
+
+    return Path(dateipfad).read_bytes()
+
+
+def _konvertiere_zu_bildern(dateipfad: str) -> list[tuple[str, str]]:
+    """Ein einzelner Konvertierungsversuch — siehe datei_zu_bilder_base64."""
+    rohdaten = _lies_datei_bytes(dateipfad)
+
+    if Path(dateipfad).suffix.lower() == ".pdf":
+        pdf = pdfium.PdfDocument(rohdaten)
+        try:
+            anzahl = min(len(pdf), MAX_PDF_SEITEN)
+            bilder = []
+            for i in range(anzahl):
+                bitmap = pdf[i].render(scale=2)
+                pil_image = bitmap.to_pil()
+                buf = io.BytesIO()
+                pil_image.save(buf, format="PNG")
+                bilder.append((base64.standard_b64encode(buf.getvalue()).decode("utf-8"), "image/png"))
+        finally:
+            pdf.close()
         return bilder
 
     # Bild-Dateien
-    with Image.open(dateipfad) as img:
+    with Image.open(io.BytesIO(rohdaten)) as img:
         if img.mode == "RGBA":
             img = img.convert("RGB")
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         return [(base64.standard_b64encode(buf.getvalue()).decode("utf-8"), "image/png")]
+
+
+def datei_zu_bilder_base64(dateipfad: str) -> list[tuple[str, str]]:
+    """Konvertiert PDF (alle Seiten bis MAX) oder Bild → Liste von (base64, media_type).
+
+    Mit Retry: erwischt der erste Versuch die Datei mitten im OneDrive-Sync,
+    ist der Fehler transient — ein zweiter Anlauf nach PDF_LADE_DELAY Sekunden
+    bekommt sie fertig. Erst nach PDF_LADE_VERSUCHE erfolglosen Versuchen wird
+    der letzte Fehler weitergereicht (ein wirklich defektes PDF bleibt ein
+    Fehler und wird nicht als leer durchgewunken).
+    """
+    dateiname = os.path.basename(dateipfad)
+    letzter_fehler = None
+
+    for versuch in range(1, config.PDF_LADE_VERSUCHE + 1):
+        try:
+            return _konvertiere_zu_bildern(dateipfad)
+        except Exception as e:
+            letzter_fehler = e
+            if versuch < config.PDF_LADE_VERSUCHE:
+                log.warning(
+                    f"Lesen von {dateiname} fehlgeschlagen "
+                    f"(Versuch {versuch}/{config.PDF_LADE_VERSUCHE}): {e} — "
+                    f"neuer Versuch in {config.PDF_LADE_DELAY}s"
+                )
+                time.sleep(config.PDF_LADE_DELAY)
+
+    raise letzter_fehler
 
 
 class ClaudeAPIFehler(Exception):
@@ -838,13 +935,18 @@ def lege_datei_ab(dateipfad: str, daten: dict) -> bool:
 #  Verarbeitungs-Pipeline
 # ═══════════════════════════════════════════════════════════════════════════
 
-def verarbeite_datei(dateipfad: str):
-    """Hauptpipeline: Extraktion → Confidence-Logik → Ablage."""
+def verarbeite_datei(dateipfad: str) -> bool:
+    """Hauptpipeline: Extraktion → Confidence-Logik → Ablage.
+
+    True = erledigt (abgelegt, markiert oder bewusst uebersprungen).
+    False = Extraktion fehlgeschlagen, Datei liegt weiter in der Inbox —
+    der BelegHandler nutzt das fuer einen zweiten Anlauf nach dem Sync.
+    """
     dateiname = os.path.basename(dateipfad)
 
     # Bereits markierte Dateien überspringen
     if dateiname.startswith("[PRÜFEN]_") or dateiname.startswith("[DUPLIKAT]_"):
-        return
+        return True
 
     log.info(f"Verarbeite: {dateiname}")
 
@@ -855,12 +957,12 @@ def verarbeite_datei(dateipfad: str):
         log.error(f"Extraktion fehlgeschlagen für {dateiname}: {e.kurz} – Datei bleibt in Inbox.")
         toast("Beleg nicht verarbeitet",
               f"{dateiname} – {e.kurz} Datei bleibt in _Inbox.")
-        return
+        return False
     if daten is None:
         log.error(f"Extraktion fehlgeschlagen für {dateiname} – Antwort unlesbar. Datei bleibt in Inbox.")
         toast("Beleg nicht verarbeitet",
               f"{dateiname} – Antwort von Claude nicht auswertbar (Bild/JSON). Datei bleibt in _Inbox.")
-        return
+        return False
 
     confidence = daten.get("gesamt_confidence", 0)
     typ = daten.get('typ', 'Rechnung')
@@ -891,10 +993,20 @@ def verarbeite_datei(dateipfad: str):
         log.warning(f"Confidence {confidence:.1%} < {config.CONFIDENCE_RÜCKFRAGE:.0%} → [PRÜFEN]")
         markiere_als_pruefen(dateipfad, grund=f"Confidence {confidence:.0%} zu niedrig")
 
+    return True
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  Watchdog File Watcher
 # ═══════════════════════════════════════════════════════════════════════════
+
+def _groesse_oder_none(dateipfad: str) -> int | None:
+    """Dateigroesse, oder None wenn die Datei (noch) nicht lesbar ist."""
+    try:
+        return os.path.getsize(dateipfad)
+    except OSError:
+        return None
+
 
 class BelegHandler(FileSystemEventHandler):
     """Reagiert auf neue Dateien in der Inbox."""
@@ -902,38 +1014,75 @@ class BelegHandler(FileSystemEventHandler):
     def __init__(self):
         super().__init__()
         self._verarbeitet = set()
+        # Pfad → Dateigroesse zum Zeitpunkt des Fehlversuchs. Nur wenn sich
+        # die Groesse danach noch aendert (= OneDrive war schlicht noch nicht
+        # fertig), lohnt ein zweiter Anlauf. Ein dauerhaft defekter Beleg
+        # feuert so nicht bei jedem Touch erneut.
+        self._fehlgeschlagen = {}
 
-    def on_created(self, event):
+    def _beleg_pfad(self, event) -> str | None:
+        """Pfad, wenn das Event einen Beleg betrifft — sonst None."""
         if event.is_directory:
-            return
-
+            return None
         dateipfad = event.src_path
-        endung = Path(dateipfad).suffix.lower()
+        if Path(dateipfad).suffix.lower() not in config.ERLAUBTE_ENDUNGEN:
+            return None
+        return dateipfad
 
-        if endung not in config.ERLAUBTE_ENDUNGEN:
-            return
-
-        # Bereits verarbeitete überspringen (watchdog kann doppelt feuern)
+    def _bearbeite(self, dateipfad: str):
+        """Wartet auf den vollstaendigen Sync und verarbeitet die Datei."""
+        # Bereits laufende überspringen (watchdog kann doppelt feuern)
         if dateipfad in self._verarbeitet:
             return
         self._verarbeitet.add(dateipfad)
 
-        log.info(f"Neue Datei erkannt: {os.path.basename(dateipfad)}")
-        log.info(f"Warte {config.WARTE_NACH_ERKENNUNG_SEKUNDEN}s bis Datei komplett ist...")
-        time.sleep(config.WARTE_NACH_ERKENNUNG_SEKUNDEN)
-
-        # Prüfen ob Datei noch existiert (könnte verschoben worden sein)
-        if not os.path.exists(dateipfad):
-            log.warning(f"Datei existiert nicht mehr: {dateipfad}")
-            self._verarbeitet.discard(dateipfad)
-            return
-
         try:
-            verarbeite_datei(dateipfad)
+            log.info(f"Warte bis {os.path.basename(dateipfad)} vollstaendig ist...")
+            warte_bis_datei_stabil(dateipfad)
+
+            # Prüfen ob Datei noch existiert (könnte verschoben worden sein)
+            if not os.path.exists(dateipfad):
+                log.warning(f"Datei existiert nicht mehr: {dateipfad}")
+                self._fehlgeschlagen.pop(dateipfad, None)
+                return
+
+            if verarbeite_datei(dateipfad):
+                self._fehlgeschlagen.pop(dateipfad, None)
+            else:
+                self._fehlgeschlagen[dateipfad] = _groesse_oder_none(dateipfad)
         except Exception as e:
             log.error(f"Unerwarteter Fehler bei {dateipfad}: {e}", exc_info=True)
         finally:
             self._verarbeitet.discard(dateipfad)
+
+    def on_created(self, event):
+        dateipfad = self._beleg_pfad(event)
+        if dateipfad is None:
+            return
+
+        log.info(f"Neue Datei erkannt: {os.path.basename(dateipfad)}")
+        self._bearbeite(dateipfad)
+
+    def on_modified(self, event):
+        """Zweite Chance, wenn OneDrive den Inhalt erst nach dem Create liefert.
+
+        Ohne diesen Handler blieb so ein Beleg bis zum naechsten Agent-Neustart
+        liegen (Vorfall 31.08.2026: zwei Adobe-Scans). Angefasst wird nur, was
+        schon einmal fehlgeschlagen ist UND sich seitdem in der Groesse
+        veraendert hat — sonst wuerde jeder OneDrive-Touch neu triggern.
+        """
+        dateipfad = self._beleg_pfad(event)
+        if dateipfad is None or dateipfad not in self._fehlgeschlagen:
+            return
+
+        if _groesse_oder_none(dateipfad) == self._fehlgeschlagen[dateipfad]:
+            return
+
+        log.info(
+            f"{os.path.basename(dateipfad)} ist nachtraeglich gewachsen "
+            f"(OneDrive-Sync fertig) — neuer Versuch."
+        )
+        self._bearbeite(dateipfad)
 
 
 def verarbeite_bestehende_dateien():

@@ -61,7 +61,22 @@ CONFIDENCE_RÜCKFRAGE = 0.60   # Ab hier: Terminal-Rückfrage
 # Darunter: [PRÜFEN]-Prefix
 
 RÜCKFRAGE_TIMEOUT_SEKUNDEN = 60
-WARTE_NACH_ERKENNUNG_SEKUNDEN = 2
+
+# ── OneDrive-Sync: warten bis der Beleg wirklich vollstaendig lokal liegt ──
+# Die _Inbox liegt in einer OneDrive-Bibliothek. Watchdog meldet eine neue
+# Datei, sobald der Verzeichniseintrag da ist — der Inhalt kommt u.U. erst
+# Sekunden spaeter. Ein fixes sleep() reichte nicht: grosse Scan-PDFs kamen
+# abgeschnitten bei pdfium an ("PDFium: Data format error"). Statt fix zu
+# warten wird gepollt, bis die Dateigroesse konstant bleibt.
+DATEI_STABIL_INTERVALL = 0.5   # Sekunden zwischen zwei Groessen-Messungen
+DATEI_STABIL_CHECKS = 3        # so viele identische Messungen = fertig
+DATEI_STABIL_TIMEOUT = 120     # Abbruch nach N Sekunden (grosse Scans/langsamer Sync)
+
+# Files-On-Demand-Platzhalter melden bereits die finale Groesse, haben den
+# Inhalt aber nur auf dem Server. Deshalb zusaetzlich: Datei komplett nach
+# Python lesen (erzwingt die Hydration) und bei Lesefehlern erneut versuchen.
+PDF_LADE_VERSUCHE = 3          # Gesamtversuche fuer das Einlesen/Rendern
+PDF_LADE_DELAY = 2.0           # Sekunden Pause zwischen den Versuchen
 
 # ── Dateifilter ────────────────────────────────────────────────────────────
 ERLAUBTE_ENDUNGEN = {".pdf", ".jpg", ".jpeg", ".png"}
