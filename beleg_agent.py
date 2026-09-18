@@ -17,6 +17,7 @@ import stat
 import sys
 import time
 import zipfile
+from collections import Counter
 from datetime import datetime, date
 from pathlib import Path
 
@@ -520,7 +521,16 @@ def baue_zielordner(daten: dict) -> str:
 
 
 def pruefe_duplikat_protokoll(daten: dict) -> bool:
-    """Prüft ob ein ähnlicher Eintrag bereits im Excel-Protokoll existiert (fuzzy)."""
+    """Prüft ob ein ähnlicher Eintrag bereits im Excel-Protokoll existiert (fuzzy).
+
+    Verglichen wird mit dem, was schreibe_protokoll() tatsaechlich ablegt:
+    normale Belege als eine Zeile (Kopfdaten), gesplittete Sammelbelege
+    (Parkingpay) als eine Zeile pro Einzelposten. Deren Kopf (Gesamtbetrag +
+    Belegdatum) steht nie im Protokoll — daran vorbei wurde derselbe Auszug
+    zweimal abgelegt (monthly-report-2026-4.pdf, 03.05. und 30.05.2026).
+    Ein Sammelbeleg gilt als Duplikat, wenn JEDER Einzelposten schon eine
+    eigene Zeile hat.
+    """
     if not os.path.exists(config.EXCEL_PROTOKOLL):
         return False
 
@@ -531,9 +541,14 @@ def pruefe_duplikat_protokoll(daten: dict) -> bool:
         return False
 
     rs_neu = daten.get("rechnungssteller", "").lower().strip()
-    betrag_neu = daten.get("betrag", 0)
-    datum_neu = daten.get("rechnungsdatum", "")
+    if _wird_gesplittet(daten):
+        gesucht = [(datum, round(betrag, 2)) for datum, betrag, _, _ in _split_posten(daten)]
+    else:
+        gesucht = [(daten.get("rechnungsdatum", ""), round(daten.get("betrag", 0), 2))]
 
+    # Zeilen desselben Stellers (Teilstring) als (Datum, Betrag) zaehlen —
+    # zwei gleiche Posten brauchen auch zwei Zeilen
+    vorhanden = Counter()
     for row in ws.iter_rows(min_row=2, values_only=True):
         if row[0] is None:
             continue
@@ -545,17 +560,18 @@ def pruefe_duplikat_protokoll(daten: dict) -> bool:
         except (ValueError, TypeError):
             betrag_alt = 0
 
-        # Fuzzy: gleicher Steller (Teilstring), gleicher Betrag, gleiches Datum
-        if (
-            (rs_neu in rs_alt or rs_alt in rs_neu)
-            and round(betrag_alt, 2) == round(betrag_neu, 2)
-            and datum_neu == datum_alt
-        ):
-            wb.close()
-            return True
+        if rs_neu in rs_alt or rs_alt in rs_neu:
+            vorhanden[(datum_alt, round(betrag_alt, 2))] += 1
 
     wb.close()
-    return False
+
+    if not gesucht:
+        return False
+    for schluessel in gesucht:
+        if vorhanden[schluessel] == 0:
+            return False
+        vorhanden[schluessel] -= 1
+    return True
 
 
 def pruefe_duplikat_datei(zielordner: str, dateiname: str) -> bool:
@@ -720,6 +736,32 @@ def _baue_protokoll_zeile(daten: dict, original_name: str, ablagepfad: str,
 _SAMMELBELEG_SPLIT_NAMEN = {"parkingpay"}
 
 
+def _wird_gesplittet(daten: dict) -> bool:
+    """True, wenn schreibe_protokoll() Einzelposten statt einer Kopfzeile schreibt."""
+    rs = str(daten.get("rechnungssteller") or "").lower().strip()
+    return (bool(daten.get("ist_sammelbeleg"))
+            and bool(daten.get("einzelposten"))
+            and any(n in rs for n in _SAMMELBELEG_SPLIT_NAMEN))
+
+
+def _split_posten(daten: dict) -> list[tuple[str, float, str, str]]:
+    """Einzelposten so, wie sie als Protokollzeilen landen:
+    (datum, betrag, beschreibung, referenz_nr). Posten ohne lesbaren Betrag fallen weg."""
+    posten = []
+    for pos in daten.get("einzelposten") or []:
+        try:
+            pos_betrag = float(pos.get("betrag", 0) or 0)
+        except (ValueError, TypeError):
+            continue
+        posten.append((
+            str(pos.get("datum") or daten.get("rechnungsdatum", "")),
+            pos_betrag,
+            str(pos.get("beschreibung") or "").strip(),
+            str(pos.get("referenz_nr") or "").strip(),
+        ))
+    return posten
+
+
 def schreibe_protokoll(daten: dict, original_name: str, ablagepfad: str):
     """Fügt einen neuen Eintrag ins Excel-Protokoll ein.
 
@@ -738,22 +780,10 @@ def schreibe_protokoll(daten: dict, original_name: str, ablagepfad: str):
             wb = config.load_protokoll()
             ws = wb.active
 
-            ist_sammel = bool(daten.get("ist_sammelbeleg"))
-            einzelposten = daten.get("einzelposten") or []
-            rs = str(daten.get("rechnungssteller") or "").lower().strip()
-            soll_splitten = any(n in rs for n in _SAMMELBELEG_SPLIT_NAMEN)
-
-            if ist_sammel and einzelposten and soll_splitten:
+            if _wird_gesplittet(daten):
                 # Parkingpay: N Zeilen, eine pro Einzelposten
                 n = 0
-                for pos in einzelposten:
-                    try:
-                        pos_betrag = float(pos.get("betrag", 0) or 0)
-                    except (ValueError, TypeError):
-                        continue
-                    pos_datum = str(pos.get("datum") or daten.get("rechnungsdatum", ""))
-                    pos_beschr = str(pos.get("beschreibung") or "").strip()
-                    pos_ref = str(pos.get("referenz_nr") or "").strip()
+                for pos_datum, pos_betrag, pos_beschr, pos_ref in _split_posten(daten):
                     bemerkung = f"Sammelbeleg: {pos_beschr}" if pos_beschr else "Sammelbeleg"
                     zeile = _baue_protokoll_zeile(
                         daten, original_name, ablagepfad,
