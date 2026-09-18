@@ -346,13 +346,25 @@ Regeln:
   bei denen jede eine eigene Datum+Betrag-Kombination hat (z.B. Parkingpay-Monatsabrechnung,
   SBB-Halbtax-Aufstellung, PayPal-Monatsuebersicht, KK-Monatsabrechnung).
   false bei normalen Einzelrechnungen.
+"""
 
-- einzelposten: NUR befuellen wenn ist_sammelbeleg=true. Liste von Objekten mit:
-    {"datum": "YYYY-MM-DD", "betrag": 1.23, "beschreibung": "Ort/Beschreibung", "referenz_nr": ""}
+    # einzelposten nur dort anfordern, wo schreibe_protokoll() sie auch einzeln
+    # verbucht. Alle anderen Sammelbelege (MB.CHARGE, Telefon, ...) werden als
+    # EINE Monatsrechnung abgelegt — die Auflistung wurde bisher trotzdem
+    # erzeugt, weggeworfen und hat bei 8 Ladevorgaengen max_tokens gesprengt.
+    split_anbieter = " oder ".join(sorted(n.title() for n in _SAMMELBELEG_SPLIT_NAMEN))
+    prompt += f"""
+- einzelposten: NUR befuellen wenn ist_sammelbeleg=true UND der Rechnungssteller {split_anbieter} ist
+  (nur dort wird jeder Posten einzeln verbucht). Liste von Objekten mit:
+    {{"datum": "YYYY-MM-DD", "betrag": 1.23, "beschreibung": "Ort/Beschreibung", "referenz_nr": ""}}
   Der betrag ist der Einzelbetrag des jeweiligen Postens (nicht der Gesamtbetrag).
   Alle Einzelposten addiert ergeben den Gesamtbetrag des Belegs.
-  Bei Einzelrechnung: leere Liste [].
+  In allen anderen Faellen leere Liste [] — auch bei Sammelbelegen anderer Anbieter mit
+  Auflistung (z.B. Lade-, Telefon- oder KK-Monatsabrechnung): die werden als EINE
+  Monatsrechnung mit dem Gesamtbetrag abgelegt, die Einzelauflistung wird nicht gebraucht.
+"""
 
+    prompt += """
 - confidence: Dein Vertrauenswert 0.0-1.0 für jedes Feld.
   Setze zahlungsart-confidence auf 0.0 wenn du keine Zahlungsinfo findest (Feld bleibt leer).
 """
@@ -373,12 +385,25 @@ Regeln:
 
         response = client.messages.create(
             model=config.ANTHROPIC_MODEL,
-            max_tokens=1024,
+            max_tokens=config.ANTHROPIC_MAX_TOKENS,
             messages=[{"role": "user", "content": content_blocks}],
         )
     except anthropic.APIError as e:
         log.error(f"Claude API-Fehler: {e}")
         raise ClaudeAPIFehler(claude_fehler_text(e)) from e
+
+    # Abgeschnittene Antwort ehrlich melden: das JSON endet dann mitten im
+    # String und wuerde sonst als "Antwort unlesbar (Bild/JSON)" fehlgedeutet
+    # (Vorfall INV_DCH00170525, 14.09.2026).
+    if response.stop_reason == "max_tokens":
+        log.error(
+            f"Claude-Antwort abgeschnitten: {response.usage.output_tokens} Tokens "
+            f"= max_tokens ({config.ANTHROPIC_MAX_TOKENS})."
+        )
+        raise ClaudeAPIFehler(
+            f"Antwort abgeschnitten (max_tokens={config.ANTHROPIC_MAX_TOKENS}) – "
+            f"ANTHROPIC_MAX_TOKENS in config.py erhöhen?"
+        )
 
     # JSON aus Antwort parsen
     antwort_text = response.content[0].text.strip()
