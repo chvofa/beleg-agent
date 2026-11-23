@@ -43,6 +43,36 @@ STATUS_DATEI = os.path.join(AGENT_DIR, "beleg-agent.status")
 WEB_PORT = 5001
 WEB_URL = f"http://localhost:{WEB_PORT}"
 
+# ── macOS: AppKit darf nur vom Main-Thread angefasst werden ───────────────
+if sys.platform == "darwin":
+    try:
+        from Foundation import NSOperationQueue, NSThread
+    except Exception:
+        NSOperationQueue = NSThread = None
+else:
+    NSOperationQueue = NSThread = None
+
+
+def auf_main_thread(fn):
+    """Fuehrt fn auf dem AppKit-Main-Thread aus.
+
+    NSStatusItem.setMenu:/setImage: brechen den Prozess mit SIGTRAP ab
+    (BSServiceMainRunLoopQueue assertBarrierOnQueue), wenn sie aus einem
+    Background-Thread kommen. monitor_loop laeuft in einem Thread, also
+    muss jeder Icon- und Menue-Zugriff hier durch — sonst stirbt der Tray
+    genau dann, wenn ein Beleg verarbeitet wurde.
+    """
+    if NSOperationQueue is None:
+        fn()
+        return
+    try:
+        if NSThread.isMainThread():
+            fn()
+        else:
+            NSOperationQueue.mainQueue().addOperationWithBlock_(fn)
+    except Exception:
+        pass
+
 
 # ── Icon erstellen ─────────────────────────────────────────────────────────
 
@@ -110,6 +140,7 @@ class BelegTray:
     def __init__(self):
         self.icon = None
         self._web_thread = None
+        self._letzte_farbe = None
 
     # ── Web-Server starten ────────────────────────────────────────────
 
@@ -132,11 +163,24 @@ class BelegTray:
     # ── Icon-Status ───────────────────────────────────────────────────
 
     def update_icon(self, farbe):
-        if self.icon:
-            self.icon.icon = erstelle_icon(farbe)
-            labels = {"green": "Laeuft", "red": "Gestoppt", "yellow": "Warnung"}
-            self.icon.title = f"Beleg-Agent: {labels.get(farbe, farbe)}"
+        if not self.icon:
+            return
+        # Unveraenderte Farbe nicht neu setzen: spart jede Minute vier
+        # NSImage-Zuweisungen und haelt die AppKit-Zugriffe minimal.
+        if farbe == self._letzte_farbe:
+            return
+
+        bild = erstelle_icon(farbe)  # PIL — teuer, bleibt im Hintergrund
+        labels = {"green": "Laeuft", "red": "Gestoppt", "yellow": "Warnung"}
+        titel = f"Beleg-Agent: {labels.get(farbe, farbe)}"
+
+        def _anwenden():
+            self.icon.icon = bild
+            self.icon.title = titel
             self._apply_template_flag(farbe)
+
+        auf_main_thread(_anwenden)
+        self._letzte_farbe = farbe
 
     def _apply_template_flag(self, farbe):
         """macOS: markiert das NSImage als Template, damit macOS die Farbe
@@ -188,7 +232,7 @@ class BelegTray:
                     except Exception:
                         break
                 if had_event:
-                    self.icon.update_menu()
+                    auf_main_thread(self.icon.update_menu)
 
             time.sleep(15)
 

@@ -231,8 +231,15 @@ def main():
                 plist_dir = os.path.expanduser("~/Library/LaunchAgents")
                 os.makedirs(plist_dir, exist_ok=True)
                 plist_pfad = os.path.join(plist_dir, "com.meocon.beleg-agent.plist")
-                python_exe = venv_python
-                script_pfad = os.path.join(agent_dir, "tray_agent.py")
+                # Bewusst /bin/bash + start_beleg_agent.sh statt direkt
+                # Python: macOS pinnt den LaunchAgent per Launch Constraint an
+                # den cdhash seiner Binary. Homebrew-Python ist nur adhoc
+                # signiert, der cdhash wechselt bei jedem Brew-Rebuild -> macOS
+                # killt den Agent mit OS_REASON_CODESIGNING und verweigert
+                # danach den Start. /bin/bash ist ein Apple Platform Binary
+                # mit stabilem cdhash; Python laeuft als dessen Kindprozess.
+                start_script = os.path.join(agent_dir, "start_beleg_agent.sh")
+                logs = os.path.expanduser("~/Library/Logs")
                 plist_inhalt = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -242,24 +249,42 @@ def main():
     <string>com.meocon.beleg-agent</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{python_exe}</string>
-        <string>{script_pfad}</string>
+        <string>/bin/bash</string>
+        <string>{start_script}</string>
+        <string>--foreground</string>
     </array>
     <key>WorkingDirectory</key>
     <string>{agent_dir}</string>
     <key>RunAtLoad</key>
     <true/>
+    <!-- Neustart nur nach unsauberem Ende. Tray-Menue "Beenden" macht
+         exit 0 und bleibt damit beendet. -->
     <key>KeepAlive</key>
-    <false/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <!-- API-Key absichtlich nicht hier: kommt aus dem macOS-Keychain
+         (siehe .envrc / start_beleg_agent.sh). -->
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>{os.path.expanduser("~")}</string>
     </dict>
+    <!-- Ohne diese Pfade sind Startfehler unsichtbar. -->
+    <key>StandardOutPath</key>
+    <string>{logs}/beleg-agent.launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>{logs}/beleg-agent.launchd.err.log</string>
 </dict>
 </plist>"""
                 with open(plist_pfad, "w") as f:
                     f.write(plist_inhalt)
+                os.chmod(plist_pfad, 0o600)
                 print(f"  LaunchAgent erstellt: {plist_pfad}")
                 print("  Agent startet automatisch beim naechsten Login.\n")
         except Exception as e:
@@ -274,8 +299,8 @@ def main():
     print()
     print("  Starten mit:")
     if sys.platform == "darwin":
-        print(f"    .venv/bin/python3 tray_agent.py")
-        print("  Oder: ./start_beleg_agent.sh")
+        print("    ./start_beleg_agent.sh")
+        print("  Oder: Beleg-Agent starten.app (~/Applications)")
     else:
         print(f"    python {os.path.join(agent_dir, 'tray_agent.py')}")
         print("  Oder Doppelklick auf start_beleg_agent.vbs")
@@ -286,10 +311,16 @@ def main():
 
     if ja_nein("Agent jetzt starten?"):
         print("  Starte Beleg-Agent...\n")
-        subprocess.Popen(
-            [venv_python, os.path.join(agent_dir, "tray_agent.py")],
-            cwd=agent_dir,
-        )
+        if sys.platform == "darwin":
+            subprocess.Popen(
+                ["/bin/bash", os.path.join(agent_dir, "start_beleg_agent.sh")],
+                cwd=agent_dir,
+            )
+        else:
+            subprocess.Popen(
+                [venv_python, os.path.join(agent_dir, "tray_agent.py")],
+                cwd=agent_dir,
+            )
 
 
 if __name__ == "__main__":
