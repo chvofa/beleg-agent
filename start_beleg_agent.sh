@@ -55,25 +55,32 @@ fi
 if [ "${1:-}" = "--via-launchd" ]; then
     LABEL="gui/$(id -u)/com.meocon.beleg-agent"
     PLIST="$HOME/Library/LaunchAgents/com.meocon.beleg-agent.plist"
+    UEBER_LAUNCHD=0
     if launchctl print "$LABEL" >/dev/null 2>&1; then
-        launchctl kickstart "$LABEL" >/dev/null 2>&1
+        launchctl kickstart "$LABEL" >/dev/null 2>&1 && UEBER_LAUNCHD=1
     elif [ -f "$PLIST" ]; then
-        launchctl bootstrap "gui/$(id -u)" "$PLIST" >/dev/null 2>&1
-    else
-        fehler "LaunchAgent-Datei fehlt: $PLIST" \
-               "LaunchAgent fehlt — Setup pruefen"
+        launchctl bootstrap "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 && UEBER_LAUNCHD=1
     fi
-    # Auf den Webserver warten, dann Browser oeffnen
-    for _ in $(seq 1 20); do
-        if lsof -nP -iTCP:5001 -sTCP:LISTEN >/dev/null 2>&1; then
-            melde "Beleg-Agent gestartet."
-            open "http://localhost:5001" 2>/dev/null || true
-            exit 0
-        fi
-        sleep 1
-    done
-    fehler "Start dauerte zu lange — siehe ~/Library/Logs/beleg-agent.launchd.err.log" \
-           "Start fehlgeschlagen — Log pruefen"
+
+    if [ "$UEBER_LAUNCHD" -eq 1 ]; then
+        # Auf den Webserver warten, dann Browser oeffnen
+        for _ in $(seq 1 20); do
+            if lsof -nP -iTCP:5001 -sTCP:LISTEN >/dev/null 2>&1; then
+                melde "Beleg-Agent gestartet."
+                open "http://localhost:5001" 2>/dev/null || true
+                exit 0
+            fi
+            sleep 1
+        done
+        fehler "Start dauerte zu lange — siehe ~/Library/Logs/beleg-agent.launchd.err.log" \
+               "Start fehlgeschlagen — Log pruefen"
+    fi
+
+    # Kein LaunchAgent vorhanden (Autostart im Setup abgelehnt) oder launchctl
+    # verweigert: dann weiter unten direkt starten. Ohne KeepAlive, aber eine
+    # App, die nur eine Fehlermeldung zeigt, hilft niemandem. tray_agent.py
+    # oeffnet den Browser selbst, der Rest des Skripts erledigt den Start.
+    echo "Kein LaunchAgent aktiv — starte direkt (ohne Neustart-Schutz)." >&2
 fi
 
 # ── API-Key aus dem macOS-Keychain ────────────────────────────────────────
