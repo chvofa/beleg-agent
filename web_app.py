@@ -1034,10 +1034,15 @@ def api_settings_apikey():
     key = data.get("api_key", "").strip()
     if not key:
         return jsonify({"error": "Kein API Key angegeben"}), 400
-    platform_utils.set_api_key_in_env(key)
+    try:
+        meldung = platform_utils.set_api_key_in_env(key)
+    except Exception as e:
+        # Nicht "gespeichert" melden, wenn er nirgends liegt: der Agent
+        # faehrt sonst beim naechsten Start ohne Key hoch.
+        return jsonify({"error": f"Key konnte nicht gespeichert werden: {e}"}), 500
     os.environ["ANTHROPIC_API_KEY"] = key
     masked = key[:7] + "..." + key[-4:] if len(key) > 11 else key
-    return jsonify({"ok": True, "masked": masked})
+    return jsonify({"ok": True, "masked": masked, "hinweis": meldung})
 
 
 # ── Setup ─────────────────────────────────────────────────────────────────
@@ -1067,10 +1072,16 @@ def api_setup_check():
 def api_setup():
     data = request.get_json() or {}
 
-    # API Key speichern
+    # API Key speichern — zuerst, damit bei einem Fehlschlag noch keine
+    # halbfertige Installation entstanden ist.
     api_key = data.get("api_key", "")
     if api_key:
-        platform_utils.set_api_key_in_env(api_key)
+        try:
+            platform_utils.set_api_key_in_env(api_key)
+        except Exception as e:
+            return jsonify(
+                {"error": f"API Key konnte nicht gespeichert werden: {e}"}
+            ), 500
 
     # config_local.py erstellen
     stammpfad = str(data.get("ablage_stammpfad", ""))
