@@ -252,18 +252,88 @@ class HandlerZweiteChanceTest(unittest.TestCase):
 
         nochmal.assert_not_called()
 
-    def test_on_modified_ignoriert_nie_fehlgeschlagene_datei(self):
-        """Ohne vorherigen Fehlschlag ist ein modified-Event irrelevant."""
-        with mock.patch("os.path.exists", return_value=True), \
-             mock.patch("os.path.getsize", return_value=123), \
-             mock.patch.object(beleg_agent, "verarbeite_datei") as nie:
-            self.handler.on_modified(FakeEvent("/x/fremd.pdf"))
-        nie.assert_not_called()
-
     def test_on_modified_ignoriert_fremde_endungen(self):
         with mock.patch.object(beleg_agent, "verarbeite_datei") as nie:
             self.handler.on_modified(FakeEvent("/x/Belege_Protokoll.xlsx"))
         nie.assert_not_called()
+
+
+class NeueDateiOhneCreatedEventTest(unittest.TestCase):
+    """In der OneDrive-Inbox kommt fuer eine neue Datei nicht immer ein Created-Event.
+
+    Reproduziert am 24.11.2026 mit einem eigenen watchdog-Observer auf der
+    _Inbox: zwei per `cp` angelegte Dateien lieferten ausschliesslich
+    FileModifiedEvent (je 6-7 Stueck), kein FileCreatedEvent; im lokalen
+    Ordner kam das Created-Event jedes Mal. Der Handler ignorierte
+    modified-Events fuer nie fehlgeschlagene Dateien — der Beleg
+    Receipt-2202-9583-0735.pdf blieb deshalb unbemerkt in der Inbox liegen.
+    """
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.inbox = tmp.name
+        self.handler = beleg_agent.BelegHandler()
+        p = mock.patch.object(beleg_agent, "warte_bis_datei_stabil", return_value=True)
+        self.warten = p.start()
+        self.addCleanup(p.stop)
+
+    def lege_an(self, name="Receipt-2202-9583-0735.pdf"):
+        pfad = os.path.join(self.inbox, name)
+        with open(pfad, "wb") as f:
+            f.write(b"%PDF-1.4 test")
+        return pfad
+
+    @staticmethod
+    def ablage_simulieren(pfad):
+        os.remove(pfad)   # lege_datei_ab verschiebt die Datei aus der Inbox
+        return True
+
+    def test_modified_event_allein_verarbeitet_die_neue_datei(self):
+        pfad = self.lege_an()
+        with mock.patch.object(beleg_agent, "verarbeite_datei",
+                               side_effect=self.ablage_simulieren) as verarbeite:
+            self.handler.on_modified(FakeEvent(pfad))
+
+        verarbeite.assert_called_once_with(pfad)
+
+    def test_spaete_events_nach_der_ablage_loesen_nichts_mehr_aus(self):
+        """OneDrive schickt 6-7 modified-Events pro Datei — auch nach dem Verschieben."""
+        pfad = self.lege_an()
+        with mock.patch.object(beleg_agent, "verarbeite_datei",
+                               side_effect=self.ablage_simulieren) as verarbeite:
+            for _ in range(5):
+                self.handler.on_modified(FakeEvent(pfad))
+
+        self.assertEqual(verarbeite.call_count, 1)
+        self.assertEqual(self.warten.call_count, 1)
+
+    def test_liegengebliebene_datei_feuert_nicht_bei_jedem_touch(self):
+        """Erledigt, aber noch in der Inbox (z.B. Verschieben gescheitert)."""
+        pfad = self.lege_an()
+        with mock.patch.object(beleg_agent, "verarbeite_datei",
+                               return_value=True) as verarbeite:
+            for _ in range(5):
+                self.handler.on_modified(FakeEvent(pfad))
+
+        self.assertEqual(verarbeite.call_count, 1)
+
+    def test_gleicher_dateiname_wird_beim_naechsten_mal_wieder_verarbeitet(self):
+        """'Beleg für Ihre PayPal-Zahlung.pdf' heisst jedes Mal gleich."""
+        with mock.patch.object(beleg_agent, "verarbeite_datei",
+                               side_effect=self.ablage_simulieren) as verarbeite:
+            self.handler.on_modified(FakeEvent(self.lege_an("Beleg.pdf")))
+            self.handler.on_modified(FakeEvent(self.lege_an("Beleg.pdf")))
+
+        self.assertEqual(verarbeite.call_count, 2)
+
+    def test_markierte_datei_wird_nicht_angefasst(self):
+        pfad = self.lege_an("[PRÜFEN]_scan.pdf")
+        with mock.patch.object(beleg_agent, "verarbeite_datei") as nie:
+            self.handler.on_modified(FakeEvent(pfad))
+
+        nie.assert_not_called()
+        self.warten.assert_not_called()
 
 
 class ConfigStabilitaetsWerteTest(unittest.TestCase):

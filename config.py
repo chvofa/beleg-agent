@@ -155,6 +155,11 @@ EXCEL_LOCK = EXCEL_PROTOKOLL + ".lock"
 _LOCK_TIMEOUT = 30      # Max. Sekunden warten
 _LOCK_STALE = 120       # Lock gilt als stale nach N Sekunden
 
+# Schreiben einer Protokoll-Zeile: Anlaeufe und Pause dazwischen. Scheitern
+# alle, nimmt der Agent die Ablage zurueck und markiert den Beleg als [PRÜFEN].
+PROTOKOLL_SCHREIBVERSUCHE = 3
+PROTOKOLL_SCHREIBPAUSE_SEKUNDEN = 5
+
 
 @contextmanager
 def excel_lock():

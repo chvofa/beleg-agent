@@ -299,8 +299,20 @@ Antworte ausschließlich mit validem JSON, kein anderer Text.
 
 Regeln:
 - rechnungssteller: Kurzname des Unternehmens (z.B. "Amazon", "Migros", "Swisscom")
-- rechnungsdatum: Falls nicht erkennbar, verwende das heutige Datum und setze confidence niedrig
-- betrag: Der tatsächlich BEZAHLTE Betrag als Zahl (kein Tausendertrennzeichen), immer positiv.
+"""
+
+    prompt += f"""- rechnungsdatum: Rechnungs-/Belegdatum. Heute ist {date.today().isoformat()}; das Datum liegt nie in der Zukunft.
+  Rein numerische Angaben wie 06/10/2026 sind bei Rechnungsstellern aus der Schweiz oder Europa
+  (Adresse, MWST-/VAT-Nr., Währung CHF/EUR) TT/MM/JJJJ — auch wenn der Beleg englisch ist.
+  Beispiel: Microsoft (Schweiz) GmbH, "Document Date 06/10/2026" → 2026-10-06 (6. Oktober).
+  MM/TT/JJJJ gilt nur bei Rechnungsstellern mit US-Adresse.
+  Prüfe die Lesart an den übrigen Datumsangaben des Belegs (Leistungszeitraum, Fälligkeit,
+  ausgeschriebene Monatsnamen; ein Tag über 12 macht das Format eindeutig).
+  Bleibt das Format unklar, setze confidence.rechnungsdatum auf höchstens 0.5.
+  Falls gar kein Datum erkennbar ist, verwende das heutige Datum und setze confidence niedrig.
+"""
+
+    prompt += """- betrag: Der tatsächlich BEZAHLTE Betrag als Zahl (kein Tausendertrennzeichen), immer positiv.
   WICHTIG bei Restaurants/Bars: Oft sind Quittung UND Kreditkartenbeleg im selben Bild.
   Wenn ein KK-Beleg vorhanden ist (Total-EFT, Summe auf Kartenbeleg), verwende DIESEN Betrag,
   denn er enthält das Trinkgeld und entspricht dem was auf der KK-Abrechnung erscheint.
@@ -762,12 +774,15 @@ def _split_posten(daten: dict) -> list[tuple[str, float, str, str]]:
     return posten
 
 
-def schreibe_protokoll(daten: dict, original_name: str, ablagepfad: str):
+def schreibe_protokoll(daten: dict, original_name: str, ablagepfad: str) -> bool:
     """Fügt einen neuen Eintrag ins Excel-Protokoll ein.
 
     Sammelbelege werden nur bei Parkingpay in Einzelposten gesplittet.
     Alle anderen Sammelbelege (SBB, etc.) werden als ein Eintrag mit
     Gesamtbetrag geschrieben.
+
+    True = Zeile(n) gespeichert. False = Protokoll auch nach mehreren
+    Versuchen nicht schreibbar — der Aufrufer muss die Ablage zuruecknehmen.
     """
     erstelle_excel_wenn_noetig()
 
@@ -775,41 +790,51 @@ def schreibe_protokoll(daten: dict, original_name: str, ablagepfad: str):
     if not daten.get("konto_vorschlag"):
         daten["konto_vorschlag"] = kontierung.vorschlag_fuer(daten.get("rechnungssteller", ""))
 
-    try:
-        with config.excel_lock():
-            wb = config.load_protokoll()
-            ws = wb.active
+    # OneDrive-Sync oder ein in Excel geoeffnetes Protokoll sperren die Datei
+    # meist nur kurz — deshalb mehrere Anlaeufe, bevor die Ablage scheitert.
+    versuche = config.PROTOKOLL_SCHREIBVERSUCHE
+    for versuch in range(1, versuche + 1):
+        try:
+            with config.excel_lock():
+                wb = config.load_protokoll()
+                ws = wb.active
 
-            if _wird_gesplittet(daten):
-                # Parkingpay: N Zeilen, eine pro Einzelposten
-                n = 0
-                for pos_datum, pos_betrag, pos_beschr, pos_ref in _split_posten(daten):
-                    bemerkung = f"Sammelbeleg: {pos_beschr}" if pos_beschr else "Sammelbeleg"
+                if _wird_gesplittet(daten):
+                    # Parkingpay: N Zeilen, eine pro Einzelposten
+                    n = 0
+                    for pos_datum, pos_betrag, pos_beschr, pos_ref in _split_posten(daten):
+                        bemerkung = f"Sammelbeleg: {pos_beschr}" if pos_beschr else "Sammelbeleg"
+                        zeile = _baue_protokoll_zeile(
+                            daten, original_name, ablagepfad,
+                            datum=pos_datum, betrag=pos_betrag,
+                            bemerkung=bemerkung, referenz_nr=pos_ref,
+                        )
+                        ws.append(zeile)
+                        n += 1
+                    erfolg = f"Sammelbeleg gesplittet: {n} Einzelposten ins Protokoll geschrieben"
+                else:
+                    # Normale Einzelrechnung
                     zeile = _baue_protokoll_zeile(
                         daten, original_name, ablagepfad,
-                        datum=pos_datum, betrag=pos_betrag,
-                        bemerkung=bemerkung, referenz_nr=pos_ref,
+                        datum=daten.get("rechnungsdatum", ""),
+                        betrag=daten.get("betrag", 0),
+                        bemerkung=daten.get("bemerkungen", ""),
+                        referenz_nr=str(daten.get("referenz_nr") or "").strip(),
                     )
                     ws.append(zeile)
-                    n += 1
-                log.info(f"Sammelbeleg gesplittet: {n} Einzelposten ins Protokoll geschrieben")
-            else:
-                # Normale Einzelrechnung
-                zeile = _baue_protokoll_zeile(
-                    daten, original_name, ablagepfad,
-                    datum=daten.get("rechnungsdatum", ""),
-                    betrag=daten.get("betrag", 0),
-                    bemerkung=daten.get("bemerkungen", ""),
-                    referenz_nr=str(daten.get("referenz_nr") or "").strip(),
-                )
-                ws.append(zeile)
-                log.info("Protokoll-Eintrag geschrieben.")
+                    erfolg = "Protokoll-Eintrag geschrieben."
 
-            wb.save(config.EXCEL_PROTOKOLL)
-            wb.close()
-    except Exception as e:
-        log.error(f"Fehler beim Schreiben ins Excel-Protokoll: {e}")
-        log.error("Ablage wird trotzdem durchgeführt.")
+                wb.save(config.EXCEL_PROTOKOLL)
+                wb.close()
+            log.info(erfolg)
+            return True
+        except Exception as e:
+            if versuch < versuche:
+                log.warning(f"Excel-Protokoll nicht schreibbar (Versuch {versuch}/{versuche}): {e}")
+                time.sleep(config.PROTOKOLL_SCHREIBPAUSE_SEKUNDEN)
+            else:
+                log.error(f"Fehler beim Schreiben ins Excel-Protokoll: {e}")
+    return False
 
 
 def terminal_rueckfrage(daten: dict, dateiname: str) -> dict | None:
@@ -953,8 +978,19 @@ def lege_datei_ab(dateipfad: str, daten: dict) -> bool:
         toast("Fehler", f"Konnte {original_name} nicht verschieben")
         return False
 
-    # Protokoll schreiben (Fehler hier soll Ablage nicht rückgängig machen)
-    schreibe_protokoll(daten, original_name, zielpfad)
+    # Ohne Protokoll-Zeile darf der Beleg nicht im Ablageordner bleiben: der
+    # Abgleich kennt ihn dann nicht und fuehrt die Zahlung dauerhaft als offen
+    # (Vorfall Juni 2026: Garage Eggimann, Kreativ Media, StreamBoy).
+    if not schreibe_protokoll(daten, original_name, zielpfad):
+        try:
+            shutil.move(zielpfad, dateipfad)
+        except Exception as e:
+            log.error(f"Ablage ohne Protokoll-Zeile, Zuruecklegen gescheitert: {zielpfad} ({e})")
+            toast("Fehler", f"{neuer_name} liegt ohne Protokoll-Eintrag im Ablageordner")
+            return False
+        log.error(f"Ablage zurueckgenommen: {original_name} liegt wieder in der Inbox.")
+        markiere_als_pruefen(dateipfad, grund="Protokoll nicht schreibbar (in Excel geöffnet?)")
+        return False
 
     # Offene Posten auflösen (falls dieser Beleg zu einer offenen Transaktion passt)
     try:
@@ -1074,13 +1110,18 @@ class BelegHandler(FileSystemEventHandler):
         # fertig), lohnt ein zweiter Anlauf. Ein dauerhaft defekter Beleg
         # feuert so nicht bei jedem Touch erneut.
         self._fehlgeschlagen = {}
+        # Pfade, die schon bearbeitet wurden und trotzdem noch in der Inbox
+        # liegen. Fuer sie ist ein modified-Event kein Zeichen fuer "neu".
+        self._liegt_noch = set()
 
     def _beleg_pfad(self, event) -> str | None:
-        """Pfad, wenn das Event einen Beleg betrifft — sonst None."""
+        """Pfad, wenn das Event einen noch unmarkierten Beleg betrifft — sonst None."""
         if event.is_directory:
             return None
         dateipfad = event.src_path
         if Path(dateipfad).suffix.lower() not in config.ERLAUBTE_ENDUNGEN:
+            return None
+        if os.path.basename(dateipfad).startswith(("[PRÜFEN]_", "[DUPLIKAT]_")):
             return None
         return dateipfad
 
@@ -1109,6 +1150,10 @@ class BelegHandler(FileSystemEventHandler):
             log.error(f"Unerwarteter Fehler bei {dateipfad}: {e}", exc_info=True)
         finally:
             self._verarbeitet.discard(dateipfad)
+            if os.path.exists(dateipfad):
+                self._liegt_noch.add(dateipfad)
+            else:
+                self._liegt_noch.discard(dateipfad)
 
     def on_created(self, event):
         dateipfad = self._beleg_pfad(event)
@@ -1119,24 +1164,34 @@ class BelegHandler(FileSystemEventHandler):
         self._bearbeite(dateipfad)
 
     def on_modified(self, event):
-        """Zweite Chance, wenn OneDrive den Inhalt erst nach dem Create liefert.
+        """Faengt auf, was on_created nicht (richtig) erwischt hat.
 
-        Ohne diesen Handler blieb so ein Beleg bis zum naechsten Agent-Neustart
-        liegen (Vorfall 31.08.2026: zwei Adobe-Scans). Angefasst wird nur, was
-        schon einmal fehlgeschlagen ist UND sich seitdem in der Groesse
-        veraendert hat — sonst wuerde jeder OneDrive-Touch neu triggern.
+        1. Zweite Chance, wenn OneDrive den Inhalt erst nach dem Create liefert.
+           Ohne das blieb so ein Beleg bis zum naechsten Agent-Neustart liegen
+           (Vorfall 31.08.2026: zwei Adobe-Scans). Angefasst wird nur, was
+           schon einmal fehlgeschlagen ist UND sich seitdem in der Groesse
+           veraendert hat — sonst wuerde jeder OneDrive-Touch neu triggern.
+        2. Neue Datei ganz ohne Created-Event. In der OneDrive-Inbox meldet
+           FSEvents eine neu angelegte Datei teils nur als "modified"
+           (Vorfall 24.11.2026). Als neu gilt, was existiert und noch nie
+           bearbeitet wurde.
         """
         dateipfad = self._beleg_pfad(event)
-        if dateipfad is None or dateipfad not in self._fehlgeschlagen:
+        if dateipfad is None:
             return
 
-        if _groesse_oder_none(dateipfad) == self._fehlgeschlagen[dateipfad]:
+        if dateipfad in self._fehlgeschlagen:
+            if _groesse_oder_none(dateipfad) == self._fehlgeschlagen[dateipfad]:
+                return
+            log.info(
+                f"{os.path.basename(dateipfad)} ist nachtraeglich gewachsen "
+                f"(OneDrive-Sync fertig) — neuer Versuch."
+            )
+        elif dateipfad in self._liegt_noch or not os.path.exists(dateipfad):
             return
+        else:
+            log.info(f"Neue Datei erkannt (ohne Created-Event): {os.path.basename(dateipfad)}")
 
-        log.info(
-            f"{os.path.basename(dateipfad)} ist nachtraeglich gewachsen "
-            f"(OneDrive-Sync fertig) — neuer Versuch."
-        )
         self._bearbeite(dateipfad)
 
 
