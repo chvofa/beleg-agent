@@ -49,7 +49,7 @@ python3 setup_beleg_agent.py         # macOS (erstellt automatisch .venv)
 
 Das Setup fragt interaktiv alles Noetige ab:
 1. Installiert Abhaengigkeiten (Windows: global, macOS: in `.venv`)
-2. Fragt den Anthropic API Key ab und speichert ihn (Windows: Umgebungsvariable, macOS: ~/.zshrc)
+2. Fragt den Anthropic API Key ab und speichert ihn (Windows: Umgebungsvariable, macOS: System-Keychain)
 3. Fragt den Belege-Ordner ab und erstellt die Ordnerstruktur
 4. Fragt die Bank ab (UBS, Raiffeisen oder PostFinance) und optional Kreditkartennummern
 5. Richtet optional den Autostart ein (Windows: Startup-Ordner, macOS: LaunchAgent)
@@ -348,8 +348,13 @@ python3 -m venv .venv
 
 **macOS (Terminal):**
 ```bash
-echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> ~/.zshrc
-source ~/.zshrc
+security add-generic-password -s beleg_agent -a ANTHROPIC_API_KEY -U -w "sk-ant-..."
+```
+
+Der Key muss in den Keychain, nicht in `~/.zshrc`: der Autostart laeuft ueber launchd, und launchd liest keine Shell-Profile. `start_beleg_agent.sh` holt ihn aus genau diesem Eintrag. Nach einer Rotation den Agent neu starten:
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.meocon.beleg-agent
 ```
 
 Oder ueber das Web-Interface: Setup-Wizard beim ersten Start, danach unter Einstellungen aenderbar.
@@ -379,7 +384,7 @@ Unterordner (`_Inbox`, `_Abgleich`, `_Dauerauftraege`) werden automatisch erstel
 | | Windows | macOS |
 |---|---|---|
 | **Python** | Globale Installation | Virtuelle Umgebung (`.venv`) |
-| **API Key** | Umgebungsvariable (User) | `~/.zshrc` + Fallback in App |
+| **API Key** | Umgebungsvariable (User) | System-Keychain (`beleg_agent`) |
 | **Autostart** | `shell:startup` Verknuepfung | LaunchAgent Plist |
 | **Start-Befehl** | `start_beleg_agent.vbs` | `./start_beleg_agent.sh` |
 | **Tray-Icon** | Taskleiste unten rechts | Menueleiste oben rechts |
