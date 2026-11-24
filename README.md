@@ -53,7 +53,8 @@ Das Setup fragt interaktiv alles Noetige ab:
 3. Fragt den Belege-Ordner ab und erstellt die Ordnerstruktur
 4. Fragt die Bank ab (UBS, Raiffeisen oder PostFinance) und optional Kreditkartennummern
 5. Richtet optional den Autostart ein (Windows: Startup-Ordner, macOS: LaunchAgent)
-6. Bietet an, den Agent direkt zu starten
+6. Legt auf macOS optional `Beleg-Agent starten.app` in `~/Applications` an (Dock, Spotlight)
+7. Bietet an, den Agent direkt zu starten
 
 ### Update (bestehende Installation)
 
@@ -95,7 +96,13 @@ Belege/                          <-- dein gewaehlter Ordner
 | | Befehl |
 |---|---|
 | **Windows** | Doppelklick auf `start_beleg_agent.vbs` |
-| **macOS** | `./start_beleg_agent.sh` oder `.venv/bin/python3 tray_agent.py` |
+| **macOS** | `Beleg-Agent starten.app` (Spotlight oder `~/Applications`) oder `./start_beleg_agent.sh` |
+
+Die macOS-App startet den Agent ueber launchd — er laeuft also weiter, wenn die App sich schliesst, und wird nach einem Absturz neu gestartet. Ohne LaunchAgent startet sie ihn direkt (ohne Neustart-Schutz). Angelegt wird sie vom Setup; nachtraeglich mit:
+
+```bash
+python3 -c "import setup_beleg_agent as s, os; print(s.erstelle_start_app(os.getcwd()))"
+```
 
 Was passiert:
 - Das **Web-Interface** oeffnet sich automatisch unter `http://localhost:5001`

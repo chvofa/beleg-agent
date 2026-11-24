@@ -5,8 +5,10 @@ Fragt alle noetigen Einstellungen ab und richtet den Agent ein.
 """
 
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import platform_utils
@@ -32,6 +34,81 @@ def ja_nein(text, standard=True):
     if not eingabe:
         return standard
     return eingabe in ("j", "ja", "y", "yes")
+
+
+def erstelle_start_app(agent_dir):
+    """Baut "Beleg-Agent starten.app" in ~/Applications (nur macOS).
+
+    Die App ruft nur start_beleg_agent.sh --via-launchd auf. Der Tray laeuft
+    damit als launchd-Job und nicht als Kind der App — er ueberlebt also das
+    Beenden der App und wird nach einem Crash neu gestartet.
+
+    Gibt den Pfad zum Bundle zurueck.
+    """
+    apps_dir = os.path.expanduser("~/Applications")
+    app_pfad = os.path.join(apps_dir, "Beleg-Agent starten.app")
+    start_script = os.path.join(agent_dir, "start_beleg_agent.sh")
+
+    if not os.path.exists(start_script):
+        raise FileNotFoundError(start_script)
+
+    os.makedirs(apps_dir, exist_ok=True)
+
+    # osacompile schreibt nicht in ein bestehendes Bundle.
+    if os.path.exists(app_pfad):
+        shutil.rmtree(app_pfad)
+
+    subprocess.check_call([
+        "osacompile", "-o", app_pfad,
+        "-e", f'do shell script "{start_script} --via-launchd"',
+    ])
+
+    # Icon setzen — rein kosmetisch, darf das Setup nicht aufhalten.
+    icon_quelle = os.path.join(agent_dir, "beleg-agent-icon.png")
+    if os.path.exists(icon_quelle):
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                iconset = os.path.join(tmp, "beleg.iconset")
+                os.makedirs(iconset)
+                # Die Quelle ist 128px; die grossen Varianten sind
+                # hochskaliert. Sichtbar wird das praktisch nur in der
+                # Finder-Galerie, Dock und Spotlight bleiben nativ.
+                groessen = [
+                    (16, "icon_16x16.png"), (32, "icon_16x16@2x.png"),
+                    (32, "icon_32x32.png"), (64, "icon_32x32@2x.png"),
+                    (128, "icon_128x128.png"), (256, "icon_128x128@2x.png"),
+                    (256, "icon_256x256.png"), (512, "icon_256x256@2x.png"),
+                    (512, "icon_512x512.png"), (1024, "icon_512x512@2x.png"),
+                ]
+                for kante, name in groessen:
+                    subprocess.check_call(
+                        ["sips", "-z", str(kante), str(kante), icon_quelle,
+                         "--out", os.path.join(iconset, name)],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                icns = os.path.join(tmp, "applet.icns")
+                subprocess.check_call(
+                    ["iconutil", "-c", "icns", iconset, "-o", icns],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                shutil.copy2(
+                    icns,
+                    os.path.join(app_pfad, "Contents", "Resources", "applet.icns"),
+                )
+            # Das Icon liegt im versiegelten Resources-Ordner — ohne neues
+            # Siegel meldet macOS "a sealed resource is missing or invalid"
+            # und verweigert die App, sobald sie mal ein Quarantaene-Flag
+            # bekommt (kopiert, gesynct, heruntergeladen).
+            subprocess.check_call(
+                ["codesign", "--force", "--sign", "-", app_pfad],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            # Finder zeigt sonst weiter das Standard-Icon aus dem Cache.
+            os.utime(app_pfad, None)
+        except Exception as e:
+            print(f"  (Icon konnte nicht gesetzt werden: {e})")
+
+    return app_pfad
 
 
 def main():
@@ -291,6 +368,22 @@ def main():
             print(f"  WARNUNG: Konnte Autostart nicht einrichten: {e}\n")
     else:
         print("  Autostart uebersprungen.\n")
+
+    # ── 5. Start-App (macOS) ──────────────────────────────────────────────
+    if sys.platform == "darwin":
+        print("[5/5] Start-App\n")
+        print("  Eine App in ~/Applications fuer Dock und Spotlight. Sie startet")
+        print("  den Agent und oeffnet das Web-Interface.\n")
+
+        if ja_nein("Start-App anlegen?"):
+            try:
+                app_pfad = erstelle_start_app(agent_dir)
+                print(f"  Erstellt: {app_pfad}\n")
+            except Exception as e:
+                print(f"  WARNUNG: Konnte Start-App nicht anlegen: {e}")
+                print("  Start stattdessen mit: ./start_beleg_agent.sh\n")
+        else:
+            print("  Start-App uebersprungen.\n")
 
     # ── Fertig ────────────────────────────────────────────────────────────
     print("=" * 58)
