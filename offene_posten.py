@@ -9,6 +9,7 @@ Zwei Status: Offen (default) / Ignoriert (mit Pflicht-Grund).
 liegt dann im Haupt-Protokoll (Abgeglichen=Ja).
 """
 
+import re
 from datetime import datetime, date
 
 import openpyxl
@@ -181,9 +182,29 @@ def upsert(ws, quelle: str, datum, betrag: float, waehrung: str, text: str) -> s
     return "neu"
 
 
+def _name_im_text(rs_teile: list[str], text_upper: str) -> bool:
+    """True, wenn ein Rechnungssteller-Wort im Buchungstext vorkommt.
+
+    Kartenabrechnungen kuerzen lange Haendlernamen ("PP*PP* FS TECHSMIT" fuer
+    TechSmith). Deshalb zaehlt auch ein Wort aus dem Buchungstext, das der
+    Anfang eines Rechnungssteller-Worts ist — sofern es mindestens 5 Zeichen
+    hat und hoechstens 3 Zeichen fehlen. Kuerzere Anfaenge ("SKY" in "Skype",
+    "MEDIA" in "MediaMarkt") waeren zufaellige Treffer.
+    """
+    if any(t in text_upper for t in rs_teile):
+        return True
+    for wort in re.split(r"[^A-Z0-9ÄÖÜ]+", text_upper):
+        if len(wort) < 5:
+            continue
+        for teil in rs_teile:
+            if teil.startswith(wort) and len(teil) - len(wort) <= 3:
+                return True
+    return False
+
+
 def resolve(ws, datum, betrag: float, waehrung: str,
             rechnungssteller: str = "", datum_fenster: int = 120,
-            betrag_toleranz: float = 0.10) -> int:
+            betrag_toleranz: float = 0.10, nur_bester_treffer: bool = False) -> int:
     """Loescht offene Posten die auf einen neu abgelegten Beleg passen.
 
     Match-Kriterien:
@@ -197,6 +218,12 @@ def resolve(ws, datum, betrag: float, waehrung: str,
       Positives bei weiterem Datumsfenster, wo z.B. zwei unabhaengige 100 CHF-
       Betraege zufaellig zusammen matchen koennten.
 
+    nur_bester_treffer=True loescht hoechstens EINEN Posten: den zeitlich
+    naechsten, bei gleichem Abstand den mit dem genaueren Betrag. Das ist der
+    Pfad beim Einlesen eines Belegs — ein Beleg gehoert zu genau einer
+    Transaktion. Ohne das Flag verschwanden bei monatlichen Abos mit gleichem
+    Betrag (Sky, Streamboy) auch die Monate, fuer die noch kein Beleg da war.
+
     Gibt die Anzahl geloeschter Zeilen zurueck.
     """
     d_norm = _norm_datum(datum)
@@ -208,35 +235,38 @@ def resolve(ws, datum, betrag: float, waehrung: str,
 
     rs_teile: list[str] = []
     if rechnungssteller:
-        import re
         rs_clean = re.sub(r"\([^)]*\)", "", rechnungssteller.upper())
         rs_teile = [t for t in rs_clean.split() if len(t) > 2]
 
-    zu_loeschen = []
+    # (Tage Abstand, Betragsabweichung, Zeile) je passendem Posten
+    treffer = []
     for row_idx in range(2, ws.max_row + 1):
         r = _row_to_dict(ws, row_idx)
         if r["status"] != "Offen":
             continue
         if r["waehrung"] != w_norm:
             continue
-        if abs(r["betrag"] - float(betrag)) > betrag_toleranz:
+        abweichung = abs(r["betrag"] - float(betrag))
+        if abweichung > betrag_toleranz:
             continue
         try:
             r_datum = datetime.strptime(r["datum"], "%Y-%m-%d").date()
         except ValueError:
             continue
-        if abs((r_datum - d_ref).days) > datum_fenster:
+        tage = abs((r_datum - d_ref).days)
+        if tage > datum_fenster:
             continue
-        if rs_teile:
-            text_upper = r["text"].upper()
-            if not any(t in text_upper for t in rs_teile):
-                continue
-        zu_loeschen.append(row_idx)
+        if rs_teile and not _name_im_text(rs_teile, r["text"].upper()):
+            continue
+        treffer.append((tage, round(abweichung, 2), row_idx))
 
-    for row_idx in sorted(zu_loeschen, reverse=True):
+    if nur_bester_treffer and treffer:
+        treffer = [min(treffer)]
+
+    for _, _, row_idx in sorted(treffer, key=lambda t: t[2], reverse=True):
         ws.delete_rows(row_idx, 1)
 
-    return len(zu_loeschen)
+    return len(treffer)
 
 
 def resolve_by_name(ws, rechnungssteller: str, betrag: float, waehrung: str) -> int:
@@ -258,7 +288,6 @@ def resolve_by_name(ws, rechnungssteller: str, betrag: float, waehrung: str) -> 
     rs_upper = (rechnungssteller or "").upper()
     # Klammer-Hinweise wie "(Büromiete)" ignorieren, damit der Matcher
     # greift auch wenn der OCR einen Zusatz extrahiert hat.
-    import re
     rs_clean = re.sub(r"\([^)]*\)", "", rs_upper)
     rs_teile = [t for t in rs_clean.split() if len(t) > 2]
     if not rs_teile:
@@ -273,8 +302,7 @@ def resolve_by_name(ws, rechnungssteller: str, betrag: float, waehrung: str) -> 
             continue
         if abs(r["betrag"] - float(betrag)) > 0.02:
             continue
-        text_upper = r["text"].upper()
-        if not any(t in text_upper for t in rs_teile):
+        if not _name_im_text(rs_teile, r["text"].upper()):
             continue
         zu_loeschen.append(row_idx)
 
@@ -375,7 +403,8 @@ def resolve_standalone(datum, betrag: float, waehrung: str,
                 wb.close()
                 return 0
             ws = wb[SHEET_NAME]
-            anzahl = resolve(ws, datum, betrag, waehrung, rechnungssteller=rechnungssteller)
+            anzahl = resolve(ws, datum, betrag, waehrung, rechnungssteller=rechnungssteller,
+                             nur_bester_treffer=True)
             if anzahl > 0:
                 wb.save(config.EXCEL_PROTOKOLL)
             wb.close()

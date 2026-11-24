@@ -14,6 +14,7 @@ Monatsrechnung mit Gesamtbetrag abgelegt. Die Liste war also reiner Ballast.
 
 Run:  .venv/bin/python3 -m unittest test_extraktion -v
 """
+import datetime
 import json
 import types
 import unittest
@@ -127,6 +128,47 @@ class EinzelpostenNurFuerSplitAnbieterTest(ExtraktionsTestBasis):
         regel = prompt[prompt.index("- einzelposten:"):]
         self.assertIn("Testanbieter", regel)
         self.assertIn("Parkingpay", regel)
+
+
+class DatumsformatTest(ExtraktionsTestBasis):
+    """Numerische Datumsangaben duerfen nicht nach US-Art gelesen werden.
+
+    Vorfall 24.11.2026: Microsoft (Schweiz) GmbH schreibt "Document Date
+    06/10/2026" (= 6. Oktober, laut Mail "Billing date: October 6, 2026").
+    Claude las den englischen Beleg als MM/TT und lieferte 2026-06-10; die
+    Rechnung G196395536 vom 06/11/2026 wurde zum 11. Juni. Beide landeten im
+    Ordner 06_Juni, und der Abgleich haette sie (Fenster 90 Tage) nie gefunden.
+    Der Prompt enthielt keine Regel zum Datumsformat und nannte nicht einmal
+    das heutige Datum, auf das er als Ersatzwert verweist.
+    """
+
+    def prompt_text(self):
+        self.extrahiere(fake_response(GUELTIGES_JSON))
+        bloecke = self.create_kwargs["messages"][0]["content"]
+        return next(b["text"] for b in bloecke if b["type"] == "text")
+
+    def datumsregel(self):
+        prompt = self.prompt_text()
+        return prompt[prompt.index("- rechnungsdatum:"):prompt.index("- betrag:")]
+
+    def test_prompt_nennt_das_heutige_datum(self):
+        with mock.patch.object(beleg_agent, "date") as fake_date:
+            fake_date.today.return_value = datetime.date(2026, 11, 24)
+            regel = self.datumsregel()
+        self.assertIn("2026-11-24", regel)
+
+    def test_prompt_legt_tag_monat_fuer_schweiz_und_europa_fest(self):
+        regel = self.datumsregel()
+        self.assertIn("TT/MM/JJJJ", regel)
+        self.assertIn("Schweiz", regel)
+
+    def test_prompt_laesst_us_format_nur_fuer_us_rechnungssteller_zu(self):
+        regel = self.datumsregel()
+        self.assertIn("MM/TT/JJJJ", regel)
+        self.assertIn("US-Adresse", regel)
+
+    def test_prompt_verlangt_niedrige_confidence_bei_unklarem_format(self):
+        self.assertIn("höchstens 0.5", self.datumsregel())
 
 
 class VerarbeiteDateiAbgeschnittenTest(unittest.TestCase):
